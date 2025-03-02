@@ -13,10 +13,10 @@ const { validate } = require('../middlewares/validator');
 
 /**
  * @swagger
- * /query/openquery:
+ * /query/pick-article-rule:
  *   get:
- *     summary: Выполнение запроса OPENQUERY
- *     description: Выполняет запрос к базе данных через OPENQUERY для получения данных из wms.pick_article_rule
+ *     summary: Получение правил отбора артикула
+ *     description: Получает правила отбора артикула из таблицы wms.pick_article_rule по ID склада и артикула
  *     tags: [Запросы]
  *     parameters:
  *       - in: query
@@ -47,7 +47,7 @@ const { validate } = require('../middlewares/validator');
  *       500:
  *         $ref: '#/components/responses/InternalError'
  */
-router.get('/openquery', [
+router.get('/pick-article-rule', [
   query('warehouseId')
     .isString()
     .trim()

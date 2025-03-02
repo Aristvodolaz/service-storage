@@ -3,7 +3,7 @@ const { executeOpenQuery, executeCustomQuery } = require('../../controllers/Quer
 
 // Мокаем модуль базы данных
 jest.mock('../../config/database', () => ({
-  pool: mockPool
+  connectToDatabase: jest.fn().mockResolvedValue(mockPool)
 }));
 
 // Мокаем логгер

@@ -26,23 +26,23 @@ describe('API Routes', () => {
     });
   });
 
-  describe('GET /query/openquery', () => {
+  describe('GET /query/pick-article-rule', () => {
     it('should return 400 if no warehouseId provided', async () => {
-      const response = await request(app).get('/query/openquery?articleId=13500');
+      const response = await request(app).get('/query/pick-article-rule?articleId=13500');
       expect(response.status).toBe(400);
       expect(response.body.success).toBe(false);
       expect(response.body.errorCode).toBe(400);
     });
 
     it('should return 400 if no articleId provided', async () => {
-      const response = await request(app).get('/query/openquery?warehouseId=WH001');
+      const response = await request(app).get('/query/pick-article-rule?warehouseId=WH001');
       expect(response.status).toBe(400);
       expect(response.body.success).toBe(false);
       expect(response.body.errorCode).toBe(400);
     });
 
     it('should return 400 if both parameters are missing', async () => {
-      const response = await request(app).get('/query/openquery');
+      const response = await request(app).get('/query/pick-article-rule');
       expect(response.status).toBe(400);
       expect(response.body.success).toBe(false);
       expect(response.body.errorCode).toBe(400);

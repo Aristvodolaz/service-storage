@@ -135,47 +135,55 @@ Swagger UI предоставляет интерактивный интерфе�
 
 ## Выполнение SQL-запросов
 
-### Запрос OPENQUERY для получения данных из wms.pick_article_rule
+### Получение правил отбора артикула
 
 ```bash
-curl -X GET "http://localhost:3006/query/openquery?warehouseId=WH001&articleId=13500" -H "accept: application/json"
+curl -X GET "http://localhost:3006/query/pick-article-rule?warehouseId=WH001&articleId=13500" -H "accept: application/json"
 ```
 
 ### Пример ответа (успешный)
 
 ```json
-[
-  {
-    "warehouse_id": "WH001",
-    "article_id": "13500",
-    "pick_rule_id": 1,
-    "priority": 10,
-    "created_at": "2023-01-15T10:30:00.000Z",
-    "updated_at": "2023-01-15T10:30:00.000Z"
-  },
-  {
-    "warehouse_id": "WH001",
-    "article_id": "13500",
-    "pick_rule_id": 2,
-    "priority": 20,
-    "created_at": "2023-01-15T10:30:00.000Z",
-    "updated_at": "2023-01-15T10:30:00.000Z"
-  }
-]
+{
+  "success": true,
+  "data": [
+    {
+      "warehouse_id": "WH001",
+      "article_id": "13500",
+      "pick_rule_id": 1,
+      "priority": 10,
+      "created_at": "2023-01-15T10:30:00.000Z",
+      "updated_at": "2023-01-15T10:30:00.000Z"
+    },
+    {
+      "warehouse_id": "WH001",
+      "article_id": "13500",
+      "pick_rule_id": 2,
+      "priority": 20,
+      "created_at": "2023-01-15T10:30:00.000Z",
+      "updated_at": "2023-01-15T10:30:00.000Z"
+    }
+  ]
+}
 ```
 
 ### Пример ответа (данные не найдены)
 
 ```json
-[]
+{
+  "success": false,
+  "errorCode": 404,
+  "msg": "Данные не найдены для warehouse_id = WH001 и article_id = 13500"
+}
 ```
 
 ### Пример ответа (некорректный запрос)
 
 ```json
 {
-  "code": 400,
-  "message": "ID склада должен быть указан и не может быть пустым"
+  "success": false,
+  "errorCode": 400,
+  "msg": "ID склада должен быть указан и не может быть пустым"
 }
 ```
 
@@ -197,6 +205,7 @@ curl -X POST "http://localhost:3006/query/custom" \
 
 ```json
 {
+  "success": true,
   "rowCount": 10,
   "data": [
     {
@@ -222,7 +231,8 @@ curl -X POST "http://localhost:3006/query/custom" \
 
 ```json
 {
-  "code": 500,
-  "message": "Ошибка выполнения SQL-запроса: Invalid object name 'products'"
+  "success": false,
+  "errorCode": 500,
+  "msg": "Ошибка выполнения SQL-запроса: Invalid object name 'products'"
 }
 ```

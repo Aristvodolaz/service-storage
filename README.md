@@ -136,10 +136,10 @@ GET /searchPrunit?productId=<ID продукта>
 GET /auth?id=<ID сотрудника>
 ```
 
-#### Выполнение OPENQUERY запроса
+#### Получение правил отбора артикула
 
 ```
-GET /query/openquery?warehouseId=<ID склада>&articleId=<ID артикула>
+GET /query/pick-article-rule?warehouseId=<ID склада>&articleId=<ID артикула>
 ```
 
 #### Выполнение произвольного SQL-запроса

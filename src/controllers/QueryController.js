@@ -1,4 +1,4 @@
-const { pool } = require('../config/database');
+const { connectToDatabase } = require('../config/database');
 const logger = require('../utils/logger');
 
 /**
@@ -20,6 +20,9 @@ const executeOpenQuery = async (req, res) => {
     }
 
     logger.info(`Выполнение запроса OPENQUERY: warehouseId = ${warehouseId}, articleId = ${articleId}`);
+
+    // Получаем пул подключений
+    const pool = await connectToDatabase();
 
     // Формирование SQL-запроса с параметрами
     const query = `
@@ -73,6 +76,9 @@ const executeCustomQuery = async (req, res) => {
     }
 
     logger.info(`Выполнение произвольного SQL-запроса: ${query}`);
+
+    // Получаем пул подключений
+    const pool = await connectToDatabase();
 
     // Создаем запрос
     const request = pool.request();
