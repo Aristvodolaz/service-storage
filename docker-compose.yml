@@ -9,10 +9,10 @@ services:
     container_name: storage-service
     restart: unless-stopped
     ports:
-      - "3005:3005"
+      - "3006:3006"
     environment:
       - NODE_ENV=production
-      - PORT=3005
+      - PORT=3006
       - DB_USER=${DB_USER}
       - DB_PASSWORD=${DB_PASSWORD}
       - DB_SERVER=${DB_SERVER}
@@ -44,4 +44,4 @@ services:
 
 networks:
   storage-network:
-    driver: bridge 
+    driver: bridge

@@ -13,7 +13,7 @@ RUN npm install
 RUN mkdir -p logs
 
 # Открываем порты для приложения и отладки
-EXPOSE 3005 9229
+EXPOSE 3006 9229
 
 # Запускаем приложение в режиме разработки
-CMD ["npm", "run", "dev"] 
+CMD ["npm", "run", "dev"]

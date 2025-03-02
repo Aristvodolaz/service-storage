@@ -16,7 +16,7 @@ COPY . .
 RUN mkdir -p logs
 
 # Открываем порт, который будет использоваться приложением
-EXPOSE 3005
+EXPOSE 3006
 
 # Запускаем приложение
-CMD ["node", "src/server.js"] 
+CMD ["node", "src/server.js"]

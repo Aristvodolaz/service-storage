@@ -9,11 +9,11 @@ services:
     container_name: storage-service-dev
     restart: unless-stopped
     ports:
-      - "3005:3005"
+      - "3006:3006"
       - "9229:9229" # Для отладки
     environment:
       - NODE_ENV=development
-      - PORT=3005
+      - PORT=3006
       - DB_USER=${DB_USER}
       - DB_PASSWORD=${DB_PASSWORD}
       - DB_SERVER=${DB_SERVER}
@@ -47,4 +47,4 @@ services:
 
 networks:
   storage-network-dev:
-    driver: bridge 
+    driver: bridge
