@@ -13,8 +13,9 @@ const executeOpenQuery = async (req, res) => {
     // Проверка наличия обязательных параметров
     if (!warehouseId || !articleId) {
       return res.status(400).json({
-        code: 400,
-        message: 'Необходимо указать warehouseId и articleId'
+        success: false,
+        errorCode: 400,
+        msg: 'Необходимо указать warehouseId и articleId'
       });
     }
 
@@ -32,18 +33,23 @@ const executeOpenQuery = async (req, res) => {
     // Если данные не найдены
     if (result.recordset.length === 0) {
       return res.status(404).json({
-        code: 404,
-        message: `Данные не найдены для warehouse_id = ${warehouseId} и article_id = ${articleId}`
+        success: false,
+        errorCode: 404,
+        msg: `Данные не найдены для warehouse_id = ${warehouseId} и article_id = ${articleId}`
       });
     }
 
     // Возвращаем результат
-    return res.status(200).json(result.recordset);
+    return res.status(200).json({
+      success: true,
+      data: result.recordset
+    });
   } catch (error) {
     logger.error(`Ошибка при выполнении запроса OPENQUERY: ${error.message}`);
     return res.status(500).json({
-      code: 500,
-      message: 'Внутренняя ошибка сервера при выполнении запроса'
+      success: false,
+      errorCode: 500,
+      msg: 'Внутренняя ошибка сервера при выполнении запроса'
     });
   }
 };
@@ -60,8 +66,9 @@ const executeCustomQuery = async (req, res) => {
     // Проверка наличия запроса
     if (!query) {
       return res.status(400).json({
-        code: 400,
-        message: 'Необходимо указать SQL-запрос'
+        success: false,
+        errorCode: 400,
+        msg: 'Необходимо указать SQL-запрос'
       });
     }
 
@@ -82,14 +89,16 @@ const executeCustomQuery = async (req, res) => {
 
     // Возвращаем результат
     return res.status(200).json({
+      success: true,
       rowCount: result.rowsAffected[0],
       data: result.recordset || []
     });
   } catch (error) {
     logger.error(`Ошибка при выполнении произвольного SQL-запроса: ${error.message}`);
     return res.status(500).json({
-      code: 500,
-      message: 'Внутренняя ошибка сервера при выполнении запроса',
+      success: false,
+      errorCode: 500,
+      msg: 'Внутренняя ошибка сервера при выполнении запроса',
       error: error.message
     });
   }

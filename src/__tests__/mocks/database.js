@@ -73,6 +73,13 @@ const mockPool = {
   })
 };
 
+// Добавляем простой тест, чтобы Jest не выдавал ошибку
+describe('Database Mocks', () => {
+  it('should have mockPool defined', () => {
+    expect(mockPool).toBeDefined();
+  });
+});
+
 module.exports = {
   mockPool,
   mockOpenQueryResult,

@@ -1,5 +1,5 @@
-const { executeOpenQuery, executeCustomQuery } = require('../../controllers/QueryController');
 const { mockPool, mockOpenQueryResult, mockEmptyResult, mockCustomQueryResult, mockQueryError } = require('../mocks/database');
+const { executeOpenQuery, executeCustomQuery } = require('../../controllers/QueryController');
 
 // Мокаем модуль базы данных
 jest.mock('../../config/database', () => ({
@@ -40,8 +40,9 @@ describe('QueryController', () => {
 
       expect(res.status).toHaveBeenCalledWith(400);
       expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
-        code: 400,
-        message: expect.stringContaining('warehouseId')
+        success: false,
+        errorCode: 400,
+        msg: expect.stringContaining('warehouseId')
       }));
     });
 
@@ -52,8 +53,9 @@ describe('QueryController', () => {
 
       expect(res.status).toHaveBeenCalledWith(400);
       expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
-        code: 400,
-        message: expect.stringContaining('articleId')
+        success: false,
+        errorCode: 400,
+        msg: expect.stringContaining('articleId')
       }));
     });
 
@@ -64,8 +66,9 @@ describe('QueryController', () => {
 
       expect(res.status).toHaveBeenCalledWith(404);
       expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
-        code: 404,
-        message: expect.stringContaining('не найдены')
+        success: false,
+        errorCode: 404,
+        msg: expect.stringContaining('не найдены')
       }));
     });
 
@@ -75,7 +78,10 @@ describe('QueryController', () => {
       await executeOpenQuery(req, res);
 
       expect(res.status).toHaveBeenCalledWith(200);
-      expect(res.json).toHaveBeenCalledWith(mockOpenQueryResult.recordset);
+      expect(res.json).toHaveBeenCalledWith({
+        success: true,
+        data: mockOpenQueryResult.recordset
+      });
     });
 
     it('should return 500 if database query fails', async () => {
@@ -88,8 +94,9 @@ describe('QueryController', () => {
 
       expect(res.status).toHaveBeenCalledWith(500);
       expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
-        code: 500,
-        message: expect.stringContaining('Внутренняя ошибка')
+        success: false,
+        errorCode: 500,
+        msg: expect.stringContaining('Внутренняя ошибка')
       }));
     });
   });
@@ -102,8 +109,9 @@ describe('QueryController', () => {
 
       expect(res.status).toHaveBeenCalledWith(400);
       expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
-        code: 400,
-        message: expect.stringContaining('SQL-запрос')
+        success: false,
+        errorCode: 400,
+        msg: expect.stringContaining('SQL-запрос')
       }));
     });
 
@@ -114,6 +122,7 @@ describe('QueryController', () => {
 
       expect(res.status).toHaveBeenCalledWith(200);
       expect(res.json).toHaveBeenCalledWith({
+        success: true,
         rowCount: mockCustomQueryResult.rowsAffected[0],
         data: mockCustomQueryResult.recordset
       });
@@ -141,8 +150,9 @@ describe('QueryController', () => {
 
       expect(res.status).toHaveBeenCalledWith(500);
       expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
-        code: 500,
-        message: expect.stringContaining('Внутренняя ошибка')
+        success: false,
+        errorCode: 500,
+        msg: expect.stringContaining('Внутренняя ошибка')
       }));
     });
   });
