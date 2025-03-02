@@ -1,0 +1,19 @@
+FROM node:18-alpine
+
+# Создаем директорию приложения
+WORKDIR /usr/src/app
+
+# Копируем файлы package.json и package-lock.json
+COPY package*.json ./
+
+# Устанавливаем зависимости, включая devDependencies
+RUN npm install
+
+# Создаем директорию для логов
+RUN mkdir -p logs
+
+# Открываем порты для приложения и отладки
+EXPOSE 3005 9229
+
+# Запускаем приложение в режиме разработки
+CMD ["npm", "run", "dev"] 

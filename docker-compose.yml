@@ -1,0 +1,47 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: storage-service
+    container_name: storage-service
+    restart: unless-stopped
+    ports:
+      - "3005:3005"
+    environment:
+      - NODE_ENV=production
+      - PORT=3005
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_SERVER=${DB_SERVER}
+      - DB_PORT=${DB_PORT}
+      - DB_DATABASE=${DB_DATABASE}
+      - DB_POOL_MAX=${DB_POOL_MAX}
+      - DB_POOL_MIN=${DB_POOL_MIN}
+      - DB_IDLE_TIMEOUT=${DB_IDLE_TIMEOUT}
+      - DB_ENCRYPT=${DB_ENCRYPT}
+      - DB_ENABLE_ARITH_ABORT=${DB_ENABLE_ARITH_ABORT}
+      - DB_TRUST_SERVER_CERTIFICATE=${DB_TRUST_SERVER_CERTIFICATE}
+      - LOG_LEVEL=info
+    volumes:
+      - ./logs:/usr/src/app/logs
+    networks:
+      - storage-network
+
+  # Добавляем Adminer для удобного управления базой данных (опционально)
+  adminer:
+    image: adminer
+    container_name: storage-adminer
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    networks:
+      - storage-network
+    depends_on:
+      - app
+
+networks:
+  storage-network:
+    driver: bridge 

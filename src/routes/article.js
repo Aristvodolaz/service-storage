@@ -1,21 +1,8 @@
 const express = require('express');
-const { searchByArticle } = require('../controllers/articleController');
-const { query, oneOf, validationResult } = require('express-validator');
+const { searchByArticle } = require('../controllers/ArticleController');
+const { query, oneOf } = require('express-validator');
+const { validate } = require('../middlewares/validator');
 const router = express.Router();
-
-// Middleware для валидации
-const validate = (req, res, next) => {
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) {
-    return res.status(400).json({ 
-      success: false, 
-      msg: 'Ошибка валидации', 
-      errors: errors.array(),
-      errorCode: 400 
-    });
-  }
-  next();
-};
 
 // Добавляем маршрут для поиска товара по артикулу с валидацией
 router.get('/', [
@@ -26,4 +13,4 @@ router.get('/', [
   validate
 ], searchByArticle);
 
-module.exports = router;
+module.exports = router; 

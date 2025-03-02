@@ -1,19 +1,42 @@
 {
   "name": "storage-service",
   "version": "1.0.0",
-  "main": "index.js",
+  "main": "src/server.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js",
+    "lint": "eslint src/**/*.js",
+    "test": "jest",
+    "docker:dev": "docker-compose -f docker-compose.dev.yml up --build",
+    "docker:dev:down": "docker-compose -f docker-compose.dev.yml down",
+    "docker:prod": "docker-compose up --build -d",
+    "docker:prod:down": "docker-compose down",
+    "docker:logs": "docker-compose logs -f",
+    "docker:stop": "docker-compose down && docker-compose -f docker-compose.dev.yml down"
   },
-  "keywords": [],
+  "keywords": [
+    "storage",
+    "api",
+    "express",
+    "mssql"
+  ],
   "author": "",
   "license": "ISC",
-  "description": "",
+  "description": "Сервис для работы с хранилищем данных",
   "dependencies": {
     "body-parser": "^1.20.3",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
+    "express-validator": "^7.0.1",
+    "mssql": "^11.0.1",
     "pg": "^8.13.1",
-    "sequelize": "^6.37.5"
+    "sequelize": "^6.37.5",
+    "winston": "^3.17.0"
+  },
+  "devDependencies": {
+    "eslint": "^8.57.0",
+    "jest": "^29.7.0",
+    "nodemon": "^3.1.0",
+    "supertest": "^6.3.4"
   }
 }
