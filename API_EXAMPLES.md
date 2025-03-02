@@ -132,3 +132,97 @@ http://localhost:3006/api-docs
 ```
 
 Swagger UI предоставляет интерактивный интерфейс для выполнения запросов и просмотра ответов, а также подробную документацию по всем доступным эндпоинтам.
+
+## Выполнение SQL-запросов
+
+### Запрос OPENQUERY для получения данных из wms.pick_article_rule
+
+```bash
+curl -X GET "http://localhost:3006/query/openquery?warehouseId=WH001&articleId=13500" -H "accept: application/json"
+```
+
+### Пример ответа (успешный)
+
+```json
+[
+  {
+    "warehouse_id": "WH001",
+    "article_id": "13500",
+    "pick_rule_id": 1,
+    "priority": 10,
+    "created_at": "2023-01-15T10:30:00.000Z",
+    "updated_at": "2023-01-15T10:30:00.000Z"
+  },
+  {
+    "warehouse_id": "WH001",
+    "article_id": "13500",
+    "pick_rule_id": 2,
+    "priority": 20,
+    "created_at": "2023-01-15T10:30:00.000Z",
+    "updated_at": "2023-01-15T10:30:00.000Z"
+  }
+]
+```
+
+### Пример ответа (данные не найдены)
+
+```json
+[]
+```
+
+### Пример ответа (некорректный запрос)
+
+```json
+{
+  "code": 400,
+  "message": "ID склада должен быть указан и не может быть пустым"
+}
+```
+
+### Выполнение произвольного SQL-запроса
+
+```bash
+curl -X POST "http://localhost:3006/query/custom" \
+  -H "Content-Type: application/json" \
+  -H "accept: application/json" \
+  -d '{
+    "query": "SELECT TOP 10 * FROM products WHERE category_id = @categoryId",
+    "params": {
+      "categoryId": 5
+    }
+  }'
+```
+
+### Пример ответа (успешный)
+
+```json
+{
+  "rowCount": 10,
+  "data": [
+    {
+      "id": 101,
+      "name": "Бумага офисная А4",
+      "article": "13500",
+      "category_id": 5,
+      "price": 299.99
+    },
+    {
+      "id": 102,
+      "name": "Ручка шариковая синяя",
+      "article": "22456",
+      "category_id": 5,
+      "price": 15.50
+    },
+    // ... остальные строки ...
+  ]
+}
+```
+
+### Пример ответа (ошибка выполнения запроса)
+
+```json
+{
+  "code": 500,
+  "message": "Ошибка выполнения SQL-запроса: Invalid object name 'products'"
+}
+```

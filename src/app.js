@@ -20,11 +20,13 @@ app.use('/api-docs', swagger.serve, swagger.setup);
 const articleRoutes = require('./routes/article');
 const prunitRoutes = require('./routes/prunit');
 const authRoutes = require('./routes/auth');
+const queryRoutes = require('./routes/query');
 
 // Регистрация маршрутов
 app.use('/search', articleRoutes);
 app.use('/searchPrunit', prunitRoutes);
 app.use('/auth', authRoutes);
+app.use('/query', queryRoutes);
 
 // Обработка ошибок 404
 app.use(notFoundHandler);

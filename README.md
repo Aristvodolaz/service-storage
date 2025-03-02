@@ -136,6 +136,27 @@ GET /searchPrunit?productId=<ID продукта>
 GET /auth?id=<ID сотрудника>
 ```
 
+#### Выполнение OPENQUERY запроса
+
+```
+GET /query/openquery?warehouseId=<ID склада>&articleId=<ID артикула>
+```
+
+#### Выполнение произвольного SQL-запроса
+
+```
+POST /query/custom
+Content-Type: application/json
+
+{
+  "query": "SQL-запрос с параметрами",
+  "params": {
+    "param1": "значение1",
+    "param2": "значение2"
+  }
+}
+```
+
 ## Разработка
 
 ### Запуск линтера
