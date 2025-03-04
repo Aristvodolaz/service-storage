@@ -2,7 +2,7 @@ const app = require('./app');
 const logger = require('./utils/logger');
 
 // Настройка порта
-const port = process.env.PORT || 3005;
+const port = 3006;
 
 // Запуск сервера
 const server = app.listen(port, () => {
@@ -36,10 +36,10 @@ function gracefulShutdown() {
     logger.info('Сервер закрыт');
     process.exit(0);
   });
-  
+
   // Если сервер не закрылся за 10 секунд, принудительно завершаем процесс
   setTimeout(() => {
     logger.error('Не удалось корректно закрыть сервер, принудительное завершение');
     process.exit(1);
   }, 10000);
-} 
+}

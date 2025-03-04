@@ -13,17 +13,17 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=3006
-      - DB_USER=${DB_USER}
-      - DB_PASSWORD=${DB_PASSWORD}
-      - DB_SERVER=${DB_SERVER}
-      - DB_PORT=${DB_PORT}
-      - DB_DATABASE=${DB_DATABASE}
-      - DB_POOL_MAX=${DB_POOL_MAX}
-      - DB_POOL_MIN=${DB_POOL_MIN}
-      - DB_IDLE_TIMEOUT=${DB_IDLE_TIMEOUT}
-      - DB_ENCRYPT=${DB_ENCRYPT}
-      - DB_ENABLE_ARITH_ABORT=${DB_ENABLE_ARITH_ABORT}
-      - DB_TRUST_SERVER_CERTIFICATE=${DB_TRUST_SERVER_CERTIFICATE}
+      - DB_USER=sa
+      - DB_PASSWORD=icY2eGuyfU
+      - DB_SERVER=PRM-SRV-MSSQL-01.komus.net
+      - DB_PORT=59587
+      - DB_DATABASE=SPOe_rc
+      - DB_POOL_MAX=500
+      - DB_POOL_MIN=0
+      - DB_IDLE_TIMEOUT=30000
+      - DB_ENCRYPT=true
+      - DB_ENABLE_ARITH_ABORT=true
+      - DB_TRUST_SERVER_CERTIFICATE=true
       - LOG_LEVEL=info
     volumes:
       - ./logs:/usr/src/app/logs
