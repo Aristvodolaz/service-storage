@@ -1,34 +1,23 @@
 version: '3.8'
 
 services:
-  app:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: storage-service
+  storage-service:
+    build: .
     container_name: storage-service
-    restart: unless-stopped
     ports:
       - "3006:3006"
     environment:
       - NODE_ENV=production
-      - PORT=3006
-      - DB_USER=sa
-      - DB_PASSWORD=icY2eGuyfU
-      - DB_SERVER=PRM-SRV-MSSQL-01.komus.net
-      - DB_PORT=59587
-      - DB_DATABASE=SPOe_rc
-      - DB_POOL_MAX=500
-      - DB_POOL_MIN=0
-      - DB_IDLE_TIMEOUT=30000
-      - DB_ENCRYPT=true
-      - DB_ENABLE_ARITH_ABORT=true
-      - DB_TRUST_SERVER_CERTIFICATE=true
-      - LOG_LEVEL=info
+      - DB_HOST=host.docker.internal
+      - DB_PORT=1433
+      - DB_USER=your_db_user
+      - DB_PASSWORD=your_db_password
+      - DB_NAME=your_db_name
     volumes:
       - ./logs:/usr/src/app/logs
-    networks:
-      - storage-network
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   # Добавляем Adminer для удобного управления базой данных (опционально)
   adminer:
@@ -40,7 +29,7 @@ services:
     networks:
       - storage-network
     depends_on:
-      - app
+      - storage-service
 
 networks:
   storage-network:

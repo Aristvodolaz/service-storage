@@ -20,7 +20,7 @@ const options = {
         description: 'Локальный сервер разработки'
       },
       {
-        url: 'https://api.komus.net/storage',
+        url: 'http://31.128.44.48:3006',
         description: 'Продакшн сервер'
       }
     ],
