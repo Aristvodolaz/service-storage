@@ -225,6 +225,28 @@ class StorageController {
       });
     }
   }
+
+  async search(req, res) {
+    try {
+      const { article } = req.query;
+
+      if (!article) {
+        return res.status(400).json({
+          success: false,
+          message: 'Не указан артикул для поиска'
+        });
+      }
+
+      const result = await storageService.searchByArticle(article);
+      return res.json(result);
+    } catch (error) {
+      logger.error('Ошибка при поиске товара:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Внутренняя ошибка сервера'
+      });
+    }
+  }
 }
 
 module.exports = new StorageController();

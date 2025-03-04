@@ -3,6 +3,20 @@ const StorageItem = require('../models/StorageItem');
 const logger = require('../utils/logger');
 
 class StorageRepository {
+  constructor(pool) {
+    this.pool = pool;
+
+    // Справочник типов единиц хранения
+    this.prunitTypes = {
+      0: { name: 'не указан', brief: 'не указан' },
+      1: { name: 'Единица', brief: 'Ед' },
+      2: { name: 'Минимальная Упаковка', brief: 'Мин.Уп' },
+      3: { name: 'Промежуточная Упаковка', brief: 'Пр.Уп' },
+      10: { name: 'Фабричная Упаковка', brief: 'Фб.Уп' },
+      11: { name: 'Паллет', brief: 'Паллет' }
+    };
+  }
+
   /**
    * Поиск товара по ШК или артикулу
    */
@@ -11,77 +25,58 @@ class StorageRepository {
       logger.info('Начало выполнения findByShkOrArticle');
       logger.info('Параметры поиска:', JSON.stringify(params));
 
-      const pool = await connectToDatabase();
       const { shk, article } = params;
 
       let query;
-      let queryParams = {};
 
       if (shk) {
         query = `
-          DECLARE @shkParam NVARCHAR(50) = ?;
           SELECT * FROM OPENQUERY(OW,
             'SELECT
               a.id,
               a.name,
               a.PIECE_GTIN as shk,
               a.article_id_real,
-              a.qnt_in_pallet,
-              p.id as prunit_id,
-              p.prunit_type_id,
-              p.product_qnt
+              a.qnt_in_pallet
             FROM wms.article a
-            LEFT JOIN wms.prunit p ON a.id = p.product_id
-            WHERE (a.PIECE_GTIN = ''' + @shkParam + '''
-               OR a.PACK_GTIN = ''' + @shkParam + '''
-               OR a.PALLET_GTIN = ''' + @shkParam + ''')
+            WHERE a.PIECE_GTIN = ''${shk}''
             AND a.article_id_real = a.id'
           )
         `;
-        queryParams = { shkParam: shk };
       } else if (article) {
         query = `
-          DECLARE @articleParam NVARCHAR(50) = ?;
           SELECT * FROM OPENQUERY(OW,
             'SELECT
               a.id,
               a.name,
               a.PIECE_GTIN as shk,
               a.article_id_real,
-              a.qnt_in_pallet,
-              p.id as prunit_id,
-              p.prunit_type_id,
-              p.product_qnt
+              a.qnt_in_pallet
             FROM wms.article a
-            LEFT JOIN wms.prunit p ON a.id = p.product_id
-            WHERE a.id = ''' + @articleParam + '''
+            WHERE a.id = ''${article}''
             AND a.article_id_real = a.id'
           )
         `;
-        queryParams = { articleParam: article };
       }
 
-      const request = pool.request();
-      for (const [key, value] of Object.entries(queryParams)) {
-        request.input(key, value);
-      }
-
-      const result = await request.query(query);
+      logger.info('Выполняемый SQL запрос:', query);
+      const result = await this.pool.request().query(query);
       logger.info(`Получено записей: ${result.recordset.length}`);
+      logger.info('Результаты поиска:', JSON.stringify(result.recordset));
 
-      return StorageItem.fromArray(result.recordset);
+      return result.recordset;
     } catch (error) {
       logger.error('Ошибка при поиске товара:', error);
       throw error;
     }
   }
 
+
   /**
    * Получение информации о товаре из x_Storage_Full_Info
    */
   async getStorageInfo(params) {
     try {
-      const pool = await connectToDatabase();
       const { productId, shk } = params;
 
       let query = `
@@ -99,7 +94,7 @@ class StorageRepository {
 
       query += ` ORDER BY Expiration_Date DESC`;
 
-      const request = pool.request();
+      const request = this.pool.request();
       if (productId) request.input('productId', productId);
       if (shk) request.input('shk', shk);
 
@@ -116,7 +111,6 @@ class StorageRepository {
    */
   async create(data) {
     try {
-      const pool = await connectToDatabase();
       const query = `
         INSERT INTO [SPOe_rc].[dbo].[x_Storage_Full_Info]
         (ID, Name, Article, SHK, Product_QNT, Prunit_Name, Prunit_Id,
@@ -128,7 +122,7 @@ class StorageRepository {
          @endExpirationDate, @executor, @placeQnt, @conditionState)
       `;
 
-      const result = await pool.request()
+      const result = await this.pool.request()
         .input('id', data.id)
         .input('name', data.name)
         .input('article', data.article)
@@ -158,7 +152,6 @@ class StorageRepository {
    */
   async update(id, data) {
     try {
-      const pool = await connectToDatabase();
       const query = `
         UPDATE [SPOe_rc].[dbo].[x_Storage_Full_Info]
         SET Product_QNT = @productQnt,
@@ -169,7 +162,7 @@ class StorageRepository {
         WHERE ID = @id AND Prunit_Id = @prunitId
       `;
 
-      const result = await pool.request()
+      const result = await this.pool.request()
         .input('id', id)
         .input('prunitId', data.prunitId)
         .input('productQnt', data.productQnt)
@@ -191,13 +184,12 @@ class StorageRepository {
    */
   async delete(id, prunitId) {
     try {
-      const pool = await connectToDatabase();
       const query = `
         DELETE FROM [SPOe_rc].[dbo].[x_Storage_Full_Info]
         WHERE ID = @id AND Prunit_Id = @prunitId
       `;
 
-      const result = await pool.request()
+      const result = await this.pool.request()
         .input('id', id)
         .input('prunitId', prunitId)
         .query(query);
@@ -207,21 +199,6 @@ class StorageRepository {
       logger.error('Ошибка при удалении записи:', error);
       throw error;
     }
-  }
-
-  /**
-   * Получение списка единиц хранения для артикула
-   */
-  constructor() {
-    // Справочник типов единиц хранения
-    this.prunitTypes = {
-      0: { name: 'не указан', brief: 'не указан' },
-      1: { name: 'Единица', brief: 'Ед' },
-      2: { name: 'Минимальная Упаковка', brief: 'Мин.Уп' },
-      3: { name: 'Промежуточная Упаковка', brief: 'Пр.Уп' },
-      10: { name: 'Фабричная Упаковка', brief: 'Фб.Уп' },
-      11: { name: 'Паллет', brief: 'Паллет' }
-    };
   }
 
   /**
@@ -240,7 +217,6 @@ class StorageRepository {
     try {
       logger.info('Начало поиска по productId:', productId);
 
-      const pool = await connectToDatabase();
       const query = `
         SELECT * FROM OPENQUERY(OW,
           'SELECT
@@ -257,7 +233,7 @@ class StorageRepository {
 
       logger.info('SQL запрос:', query);
 
-      const result = await pool.request().query(query);
+      const result = await this.pool.request().query(query);
       logger.info(`Получено записей: ${result.recordset.length}`);
 
       // Добавляем текстовое описание к каждой записи
@@ -295,7 +271,6 @@ class StorageRepository {
    */
   async getPickingLocations(productId) {
     try {
-      const pool = await connectToDatabase();
       const query = `
         SELECT DISTINCT id_scklad, WR_SHK
         FROM [SPOe_rc].[dbo].[x_Storage_Full_Info]
@@ -303,7 +278,7 @@ class StorageRepository {
         AND Condition_State = 'кондиция'
       `;
 
-      const result = await pool.request()
+      const result = await this.pool.request()
         .input('productId', productId)
         .query(query);
 
@@ -319,7 +294,6 @@ class StorageRepository {
    */
   async getBufferStock(productId) {
     try {
-      const pool = await connectToDatabase();
       const query = `
         SELECT
           ID,
@@ -336,7 +310,7 @@ class StorageRepository {
         ORDER BY Expiration_Date DESC
       `;
 
-      const result = await pool.request()
+      const result = await this.pool.request()
         .input('productId', productId)
         .query(query);
 
@@ -346,6 +320,37 @@ class StorageRepository {
       throw error;
     }
   }
+
+  async findItems(article) {
+    try {
+      logger.info('Начало выполнения findItems');
+      logger.info('Поиск по артикулу:', article);
+
+      const query = `
+        SELECT * FROM OPENQUERY(OW,
+          'SELECT
+            a.id,
+            a.name,
+            a.PIECE_GTIN as shk,
+            a.article_id_real,
+            a.qnt_in_pallet
+          FROM wms.article a
+          WHERE CAST(a.id AS VARCHAR) = ''${article}''
+          AND a.article_id_real = a.id'
+        )
+      `;
+
+      logger.info('Выполняемый SQL запрос:', query);
+      const result = await this.pool.request().query(query);
+      logger.info(`Получено записей: ${result.recordset.length}`);
+      logger.info('Результаты поиска:', JSON.stringify(result.recordset));
+
+      return result.recordset;
+    } catch (error) {
+      logger.error('Ошибка в findItems:', error);
+      throw error;
+    }
+  }
 }
 
-module.exports = new StorageRepository();
+module.exports = StorageRepository;

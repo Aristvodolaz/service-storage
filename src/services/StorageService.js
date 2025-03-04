@@ -1,12 +1,63 @@
-const storageRepository = require('../repositories/StorageRepository');
+const StorageRepository = require('../repositories/StorageRepository');
+const { connectToDatabase } = require('../config/database');
 const logger = require('../utils/logger');
 
 class StorageService {
+  constructor() {
+    this.repository = null;
+    this.initialize().catch(error => {
+      logger.error('Ошибка при инициализации StorageService:', error);
+    });
+  }
+
+  async initialize() {
+    try {
+      const pool = await connectToDatabase();
+      this.repository = new StorageRepository(pool);
+      logger.info('StorageService успешно инициализирован');
+    } catch (error) {
+      logger.error('Ошибка при инициализации StorageService:', error);
+      throw error;
+    }
+  }
+
+  async searchByArticle(article) {
+    try {
+      if (!this.repository) {
+        await this.initialize();
+      }
+      logger.info(`Поиск товара по артикулу: ${article}`);
+      const items = await this.repository.findItems(article);
+
+      if (!items || items.length === 0) {
+        logger.info(`Товар с артикулом ${article} не найден`);
+        return {
+          success: false,
+          message: 'Товар не найден',
+          data: null
+        };
+      }
+
+      logger.info(`Найдено товаров: ${items.length}`);
+      return {
+        success: true,
+        message: 'Товар найден',
+        data: items
+      };
+    } catch (error) {
+      logger.error('Ошибка при поиске товара:', error);
+      throw error;
+    }
+  }
+
   /**
    * Поиск товара по ШК или артикулу
    */
   async findItems(params) {
     try {
+      if (!this.repository) {
+        await this.initialize();
+      }
       // Проверка корректности входных данных
       if (params.shk && typeof params.shk !== 'string') {
         throw new Error('Некорректный формат штрих-кода');
@@ -15,9 +66,9 @@ class StorageService {
         throw new Error('Некорректный формат артикула');
       }
 
-      const items = await storageRepository.findByShkOrArticle(params);
+      const items = await this.repository.findByShkOrArticle(params);
 
-      if (items.length === 0) {
+      if (!items || items.length === 0) {
         return {
           success: false,
           errorCode: 404,
@@ -27,7 +78,7 @@ class StorageService {
 
       return {
         success: true,
-        data: items.map(item => item.toJSON())
+        data: items
       };
     } catch (error) {
       logger.error('Ошибка при поиске товаров:', error);
@@ -48,7 +99,7 @@ class StorageService {
         throw new Error('Некорректный формат штрих-кода');
       }
 
-      const items = await storageRepository.getStorageInfo(params);
+      const items = await this.repository.getStorageInfo(params);
 
       if (items.length === 0) {
         return {
@@ -80,7 +131,7 @@ class StorageService {
    */
   async getStorageUnits(productId) {
     try {
-      const units = await storageRepository.getStorageUnits(productId);
+      const units = await this.repository.getStorageUnits(productId);
 
       if (units.length === 0) {
         return {
@@ -108,7 +159,7 @@ class StorageService {
       const { productId, prunitId, quantity } = params;
 
       // Проверяем существование товара
-      const item = await storageRepository.getById(productId);
+      const item = await this.repository.getById(productId);
       if (!item) {
         return {
           success: false,
@@ -118,7 +169,7 @@ class StorageService {
       }
 
       // Обновляем количество
-      const updated = await storageRepository.updateQuantity(productId, prunitId, quantity);
+      const updated = await this.repository.updateQuantity(productId, prunitId, quantity);
 
       if (!updated) {
         return {
@@ -163,7 +214,7 @@ class StorageService {
       }
 
       // Проверяем существование товара
-      const storageInfo = await storageRepository.getStorageInfo({ productId });
+      const storageInfo = await this.repository.getStorageInfo({ productId });
       if (storageInfo.length === 0) {
         return {
           success: false,
@@ -175,7 +226,7 @@ class StorageService {
       const item = storageInfo[0];
 
       // Проверяем существование единицы хранения
-      const units = await storageRepository.getStorageUnits(productId);
+      const units = await this.repository.getStorageUnits(productId);
       const unit = units.find(u => u.id === prunitId);
       if (!unit) {
         return {
@@ -204,7 +255,7 @@ class StorageService {
         endExpirationDate: item.endExpirationDate
       };
 
-      const created = await storageRepository.create(bufferData);
+      const created = await this.repository.create(bufferData);
 
       if (!created) {
         return {
@@ -249,7 +300,7 @@ class StorageService {
       }
 
       // Получаем информацию о товаре в буфере
-      const bufferStock = await storageRepository.getBufferStock(productId);
+      const bufferStock = await this.repository.getBufferStock(productId);
 
       if (bufferStock.length === 0) {
         return {
@@ -279,7 +330,7 @@ class StorageService {
 
       if (condition === 'некондиция') {
         // Обновляем состояние товара на некондицию
-        const updated = await storageRepository.update(productId, {
+        const updated = await this.repository.update(productId, {
           prunitId,
           productQnt: quantity,
           placeQnt: quantity,
@@ -302,7 +353,7 @@ class StorageService {
         };
       } else {
         // Получаем адреса комплектации
-        const locations = await storageRepository.getPickingLocations(productId);
+        const locations = await this.repository.getPickingLocations(productId);
 
         if (locations.length === 0) {
           return {
@@ -313,7 +364,7 @@ class StorageService {
         }
 
         // Перемещаем товар в зону комплектации
-        const updated = await storageRepository.update(productId, {
+        const updated = await this.repository.update(productId, {
           prunitId,
           productQnt: quantity,
           placeQnt: quantity,
