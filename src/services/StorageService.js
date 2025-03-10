@@ -194,7 +194,11 @@ class StorageService {
    */
   async moveToBuffer(params) {
     try {
-      const { productId, prunitId, quantity, executor, wrShk } = params;
+      if (!this.repository) {
+        await this.initialize();
+      }
+
+      const { productId, prunitId, quantity, executor, wrShk, conditionState, expirationDate } = params;
 
       // Проверка корректности входных данных
       if (typeof productId !== 'string') {
@@ -211,6 +215,12 @@ class StorageService {
       }
       if (typeof wrShk !== 'string') {
         throw new Error('Некорректный формат штрих-кода места хранения');
+      }
+      if (conditionState && !['кондиция', 'некондиция'].includes(conditionState)) {
+        throw new Error('Некорректное состояние товара');
+      }
+      if (expirationDate && isNaN(Date.parse(expirationDate))) {
+        throw new Error('Некорректный формат срока годности');
       }
 
       // Проверяем существование товара
@@ -236,39 +246,87 @@ class StorageService {
         };
       }
 
-      // Создаем новую запись в буфере
-      const bufferData = {
-        id: productId,
-        name: item.name,
-        article: item.article,
-        shk: item.shk,
-        productQnt: quantity,
-        prunitId: prunitId,
-        prunitName: item.prunitName,
-        wrShk: wrShk,
-        idScklad: 'BUFFER',
-        executor: executor,
-        placeQnt: quantity,
-        conditionState: 'кондиция',
-        expirationDate: item.expirationDate,
-        startExpirationDate: item.startExpirationDate,
-        endExpirationDate: item.endExpirationDate
-      };
+      // Определяем ID склада в зависимости от состояния товара
+      const idScklad = conditionState === 'некондиция' ? 'BUFFER_DEFECT' : 'BUFFER';
 
-      const created = await this.repository.create(bufferData);
+      // Проверяем, есть ли уже товар в указанной ячейке
+      const existingItems = await this.repository.getExistingItemInLocation(productId, prunitId, wrShk, idScklad);
 
-      if (!created) {
+      let result;
+
+      if (existingItems && existingItems.length > 0) {
+        // Товар уже есть в ячейке, обновляем количество
+        const existingItem = existingItems[0];
+        const newQuantity = existingItem.Product_QNT + quantity;
+
+        // Обновляем запись
+        result = await this.repository.update(productId, {
+          prunitId,
+          productQnt: newQuantity,
+          placeQnt: newQuantity,
+          conditionState: conditionState || existingItem.Condition_State || 'кондиция',
+          executor,
+          idScklad,
+          wrShk,
+          expirationDate: expirationDate || existingItem.Expiration_Date
+        });
+
+        if (!result) {
+          return {
+            success: false,
+            errorCode: 400,
+            msg: 'Не удалось обновить количество товара в буфере'
+          };
+        }
+
         return {
-          success: false,
-          errorCode: 400,
-          msg: 'Не удалось разместить товар в буфер'
+          success: true,
+          msg: 'Количество товара в буфере успешно обновлено',
+          data: {
+            previousQuantity: existingItem.Product_QNT,
+            newQuantity: newQuantity,
+            location: idScklad
+          }
+        };
+      } else {
+        // Товара нет в ячейке, создаем новую запись
+        const bufferData = {
+          id: productId,
+          name: item.name,
+          article: item.article,
+          shk: item.shk,
+          productQnt: quantity,
+          prunitId: prunitId,
+          prunitName: item.prunitName,
+          wrShk: wrShk,
+          idScklad: idScklad,
+          executor: executor,
+          placeQnt: quantity,
+          conditionState: conditionState || 'кондиция',
+          expirationDate: expirationDate || item.expirationDate,
+          startExpirationDate: item.startExpirationDate,
+          endExpirationDate: item.endExpirationDate
+        };
+
+        result = await this.repository.create(bufferData);
+
+        if (!result) {
+          return {
+            success: false,
+            errorCode: 400,
+            msg: 'Не удалось разместить товар в буфер'
+          };
+        }
+
+        return {
+          success: true,
+          msg: 'Товар успешно размещен в буфер',
+          data: {
+            quantity: quantity,
+            location: idScklad
+          }
         };
       }
-
-      return {
-        success: true,
-        msg: 'Товар успешно размещен в буфер'
-      };
     } catch (error) {
       logger.error('Ошибка при размещении товара в буфер:', error);
       throw error;
@@ -280,6 +338,10 @@ class StorageService {
    */
   async moveFromBuffer(params) {
     try {
+      if (!this.repository) {
+        await this.initialize();
+      }
+
       const { productId, prunitId, quantity, condition, executor } = params;
 
       // Проверка корректности входных данных
@@ -389,6 +451,647 @@ class StorageService {
       }
     } catch (error) {
       logger.error('Ошибка при перемещении товара из буфера:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Забор товара из ячейки
+   */
+  async pickFromLocation(params) {
+    try {
+      if (!this.repository) {
+        await this.initialize();
+      }
+
+      const { productId, locationId, prunitId, quantity, executor } = params;
+
+      // Проверка корректности входных данных
+      if (typeof productId !== 'string') {
+        throw new Error('Некорректный формат ID товара');
+      }
+      if (typeof locationId !== 'string') {
+        throw new Error('Некорректный формат ID ячейки');
+      }
+      if (typeof prunitId !== 'string') {
+        throw new Error('Некорректный формат ID единицы хранения');
+      }
+      if (typeof quantity !== 'number' || quantity <= 0) {
+        throw new Error('Некорректное количество');
+      }
+      if (typeof executor !== 'string') {
+        throw new Error('Некорректный формат ID исполнителя');
+      }
+
+      // Выполняем забор товара
+      const result = await this.repository.pickFromLocation({
+        productId,
+        locationId,
+        prunitId,
+        quantity,
+        executor
+      });
+
+      if (!result) {
+        return {
+          success: false,
+          errorCode: 404,
+          msg: 'Товар не найден в указанной ячейке'
+        };
+      }
+
+      if (result.error === 'insufficient_quantity') {
+        return {
+          success: false,
+          errorCode: 400,
+          msg: `Недостаточное количество товара. Доступно: ${result.available}`,
+          available: result.available
+        };
+      }
+
+      return {
+        success: true,
+        msg: 'Товар успешно изъят из ячейки',
+        data: result
+      };
+    } catch (error) {
+      logger.error('Ошибка при заборе товара из ячейки:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Получение списка товаров в ячейке (инвентаризация по ячейке)
+   */
+  async getLocationItems(locationId) {
+    try {
+      if (!this.repository) {
+        await this.initialize();
+      }
+
+      if (typeof locationId !== 'string') {
+        throw new Error('Некорректный формат ID ячейки');
+      }
+
+      const items = await this.repository.getLocationItems(locationId);
+
+      if (!items || items.length === 0) {
+        return {
+          success: false,
+          errorCode: 404,
+          msg: 'Товары в ячейке не найдены'
+        };
+      }
+
+      // Группируем товары по артикулу для удобства отображения
+      const groupedItems = {};
+
+      items.forEach(item => {
+        if (!groupedItems[item.id]) {
+          groupedItems[item.id] = {
+            id: item.id,
+            name: item.name,
+            article: item.article,
+            shk: item.shk,
+            locationId: item.id_scklad,
+            locationName: item.name_scklad,
+            units: []
+          };
+        }
+
+        groupedItems[item.id].units.push({
+          prunitId: item.prunit_id,
+          prunitName: item.prunit_name,
+          quantity: item.product_qnt,
+          conditionState: item.condition_state,
+          expirationDate: item.expiration_date
+        });
+      });
+
+      return {
+        success: true,
+        data: Object.values(groupedItems)
+      };
+    } catch (error) {
+      logger.error('Ошибка при получении списка товаров в ячейке:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Получение списка ячеек, в которых хранится товар (инвентаризация по артикулу)
+   */
+  async getArticleLocations(article) {
+    try {
+      if (!this.repository) {
+        await this.initialize();
+      }
+
+      if (typeof article !== 'string') {
+        throw new Error('Некорректный формат артикула');
+      }
+
+      const locations = await this.repository.getArticleLocations(article);
+
+      if (!locations || locations.length === 0) {
+        return {
+          success: false,
+          errorCode: 404,
+          msg: 'Ячейки хранения для товара не найдены'
+        };
+      }
+
+      // Группируем по ячейкам
+      const groupedLocations = {};
+
+      locations.forEach(item => {
+        if (!groupedLocations[item.id_scklad]) {
+          groupedLocations[item.id_scklad] = {
+            locationId: item.id_scklad,
+            locationName: item.name_scklad,
+            productId: item.id,
+            productName: item.name,
+            article: item.article,
+            shk: item.shk,
+            units: []
+          };
+        }
+
+        groupedLocations[item.id_scklad].units.push({
+          prunitId: item.prunit_id,
+          prunitName: item.prunit_name,
+          quantity: item.product_qnt,
+          conditionState: item.condition_state,
+          expirationDate: item.expiration_date
+        });
+      });
+
+      return {
+        success: true,
+        data: Object.values(groupedLocations)
+      };
+    } catch (error) {
+      logger.error('Ошибка при получении списка ячеек для товара:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Очистка ячейки (функция "Адрес пуст")
+   */
+  async clearLocation(params) {
+    try {
+      if (!this.repository) {
+        await this.initialize();
+      }
+
+      const { locationId, executor } = params;
+
+      if (typeof locationId !== 'string') {
+        throw new Error('Некорректный формат ID ячейки');
+      }
+
+      if (typeof executor !== 'string') {
+        throw new Error('Некорректный формат ID исполнителя');
+      }
+
+      const result = await this.repository.clearLocation(locationId, executor);
+
+      if (!result.success) {
+        return {
+          success: false,
+          errorCode: 400,
+          msg: 'Не удалось очистить ячейку'
+        };
+      }
+
+      return {
+        success: true,
+        msg: result.message,
+        data: {
+          locationId,
+          clearedItems: result.clearedItems
+        }
+      };
+    } catch (error) {
+      logger.error('Ошибка при очистке ячейки:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Обновление данных инвентаризации
+   */
+  async updateInventory(params) {
+    try {
+      if (!this.repository) {
+        await this.initialize();
+      }
+
+      const { productId, locationId, prunitId, quantity, conditionState, expirationDate, executor } = params;
+
+      // Проверка корректности входных данных
+      if (typeof productId !== 'string') {
+        throw new Error('Некорректный формат ID товара');
+      }
+      if (typeof locationId !== 'string') {
+        throw new Error('Некорректный формат ID ячейки');
+      }
+      if (typeof prunitId !== 'string') {
+        throw new Error('Некорректный формат ID единицы хранения');
+      }
+      if (typeof quantity !== 'number' || quantity < 0) {
+        throw new Error('Некорректное количество');
+      }
+      if (conditionState && !['кондиция', 'некондиция'].includes(conditionState)) {
+        throw new Error('Некорректное состояние товара');
+      }
+      if (expirationDate && isNaN(Date.parse(expirationDate))) {
+        throw new Error('Некорректный формат срока годности');
+      }
+      if (typeof executor !== 'string') {
+        throw new Error('Некорректный формат ID исполнителя');
+      }
+
+      const result = await this.repository.updateInventory({
+        productId,
+        locationId,
+        prunitId,
+        quantity,
+        conditionState,
+        expirationDate,
+        executor
+      });
+
+      if (!result) {
+        return {
+          success: false,
+          errorCode: 404,
+          msg: 'Товар не найден'
+        };
+      }
+
+      return {
+        success: true,
+        msg: result.isNewItem ? 'Товар добавлен в ячейку' : 'Данные инвентаризации обновлены',
+        data: result
+      };
+    } catch (error) {
+      logger.error('Ошибка при обновлении данных инвентаризации:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Перемещение товара между ячейками (пятнашка)
+   */
+  async moveItemBetweenLocations(params) {
+    try {
+      if (!this.repository) {
+        await this.initialize();
+      }
+
+      const {
+        productId,
+        sourceLocationId,
+        targetLocationId,
+        targetWrShk,
+        prunitId,
+        quantity,
+        conditionState,
+        expirationDate,
+        executor
+      } = params;
+
+      // Проверка корректности входных данных
+      if (typeof productId !== 'string') {
+        throw new Error('Некорректный формат ID товара');
+      }
+      if (typeof sourceLocationId !== 'string') {
+        throw new Error('Некорректный формат ID исходной ячейки');
+      }
+      if (typeof targetLocationId !== 'string') {
+        throw new Error('Некорректный формат ID целевой ячейки');
+      }
+      if (typeof targetWrShk !== 'string') {
+        throw new Error('Некорректный формат штрих-кода целевой ячейки');
+      }
+      if (typeof prunitId !== 'string') {
+        throw new Error('Некорректный формат ID единицы хранения');
+      }
+      if (typeof quantity !== 'number' || quantity <= 0) {
+        throw new Error('Некорректное количество');
+      }
+      if (conditionState && !['кондиция', 'некондиция'].includes(conditionState)) {
+        throw new Error('Некорректное состояние товара');
+      }
+      if (expirationDate && isNaN(Date.parse(expirationDate))) {
+        throw new Error('Некорректный формат срока годности');
+      }
+      if (typeof executor !== 'string') {
+        throw new Error('Некорректный формат ID исполнителя');
+      }
+
+      // Получаем информацию о товаре перед перемещением
+      const sourceInfo = await this.repository.getLocationItems(sourceLocationId);
+      const sourceItem = sourceInfo.find(item =>
+        item.id === productId && item.prunit_id === prunitId
+      );
+
+      if (!sourceItem) {
+        return {
+          success: false,
+          errorCode: 404,
+          msg: 'Товар не найден в исходной ячейке'
+        };
+      }
+
+      // Проверяем достаточное количество
+      if (sourceItem.product_qnt < quantity) {
+        return {
+          success: false,
+          errorCode: 400,
+          msg: `Недостаточное количество товара. Доступно: ${sourceItem.product_qnt}, запрошено: ${quantity}`,
+          available: sourceItem.product_qnt
+        };
+      }
+
+      // Получаем информацию о целевой ячейке
+      const targetInfo = await this.repository.getLocationItems(targetLocationId);
+      const targetItem = targetInfo.find(item =>
+        item.id === productId && item.prunit_id === prunitId
+      );
+
+      const targetQuantity = targetItem ? targetItem.product_qnt : 0;
+      const isFullMove = sourceItem.product_qnt === quantity;
+
+      // Выполняем перемещение
+      const result = await this.repository.moveItemBetweenLocations({
+        productId,
+        sourceLocationId,
+        targetLocationId,
+        targetWrShk,
+        prunitId,
+        quantity,
+        conditionState,
+        expirationDate,
+        executor,
+        isFullMove
+      });
+
+      if (!result) {
+        return {
+          success: false,
+          errorCode: 404,
+          msg: 'Не удалось выполнить перемещение товара'
+        };
+      }
+
+      if (result.error === 'insufficient_quantity') {
+        return {
+          success: false,
+          errorCode: 400,
+          msg: `Недостаточное количество товара. Доступно: ${result.available}`,
+          available: result.available
+        };
+      }
+
+      // Формируем подробный ответ
+      return {
+        success: true,
+        msg: 'Товар успешно перемещен',
+        data: {
+          ...result,
+          sourceInfo: {
+            locationId: sourceLocationId,
+            previousQuantity: sourceItem.product_qnt,
+            remainingQuantity: Math.max(0, sourceItem.product_qnt - quantity),
+            isEmptied: sourceItem.product_qnt <= quantity
+          },
+          targetInfo: {
+            locationId: targetLocationId,
+            wrShk: targetWrShk,
+            previousQuantity: targetQuantity,
+            newQuantity: targetQuantity + quantity
+          },
+          movedInfo: {
+            productId,
+            name: sourceItem.name,
+            article: sourceItem.article,
+            shk: sourceItem.shk,
+            prunitId,
+            prunitName: sourceItem.prunit_name,
+            quantity,
+            conditionState: result.conditionState,
+            expirationDate: result.expirationDate,
+            isFullMove
+          }
+        }
+      };
+    } catch (error) {
+      logger.error('Ошибка при перемещении товара между ячейками:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Получение детальной информации о товаре по ШК или артикулу
+   */
+  async getDetailedItemInfo(params) {
+    try {
+      if (!this.repository) {
+        await this.initialize();
+      }
+
+      const { shk, article, wrShk } = params;
+
+      // Проверка корректности входных данных
+      if (!shk && !article && !wrShk) {
+        throw new Error('Необходимо указать ШК, артикул или ШК ячейки');
+      }
+
+      if (shk && typeof shk !== 'string') {
+        throw new Error('Некорректный формат штрих-кода');
+      }
+
+      if (article && typeof article !== 'string') {
+        throw new Error('Некорректный формат артикула');
+      }
+
+      if (wrShk && typeof wrShk !== 'string') {
+        throw new Error('Некорректный формат штрих-кода ячейки');
+      }
+
+      const result = await this.repository.getDetailedItemInfo({ shk, article, wrShk });
+
+      if (!result) {
+        return {
+          success: false,
+          errorCode: 404,
+          msg: 'Информация не найдена'
+        };
+      }
+
+      return {
+        success: true,
+        data: result
+      };
+    } catch (error) {
+      logger.error('Ошибка при получении детальной информации о товаре:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Получение списка всех ячеек хранения
+   */
+  async getAllLocations() {
+    try {
+      if (!this.repository) {
+        await this.initialize();
+      }
+
+      const locations = await this.repository.getAllLocations();
+
+      if (!locations || locations.length === 0) {
+        return {
+          success: false,
+          errorCode: 404,
+          msg: 'Ячейки хранения не найдены'
+        };
+      }
+
+      // Группируем ячейки по типу (буфер и обычные)
+      const bufferLocations = locations.filter(loc => loc.locationId.startsWith('BUFFER'));
+      const regularLocations = locations.filter(loc => !loc.locationId.startsWith('BUFFER'));
+
+      return {
+        success: true,
+        data: {
+          total: locations.length,
+          bufferLocations,
+          regularLocations
+        }
+      };
+    } catch (error) {
+      logger.error('Ошибка при получении списка ячеек хранения:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Регистрация некондиции
+   */
+  async registerDefect(data) {
+    try {
+      if (!this.repository) {
+        await this.initialize();
+      }
+
+      const { productId, defectReason, executor } = data;
+
+      // Проверка обязательных параметров
+      if (!productId) {
+        throw new Error('Не указан ID товара (productId)');
+      }
+
+      if (!defectReason) {
+        throw new Error('Не указана причина некондиции (defectReason)');
+      }
+
+      if (!executor) {
+        throw new Error('Не указан исполнитель (executor)');
+      }
+
+      logger.info('Регистрация некондиции:', JSON.stringify(data));
+
+      const result = await this.repository.registerDefect(data);
+
+      if (result === null) {
+        return {
+          success: false,
+          message: `Товар с ID ${productId} не найден`
+        };
+      }
+
+      return {
+        success: true,
+        message: 'Некондиция успешно зарегистрирована'
+      };
+    } catch (error) {
+      logger.error('Error in StorageService.registerDefect:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Получение отчета по остаткам в буфере
+   */
+  async getBufferReport() {
+    try {
+      if (!this.repository) {
+        await this.initialize();
+      }
+
+      logger.info('Получение отчета по остаткам в буфере');
+
+      const result = await this.repository.getBufferReport();
+
+      return {
+        success: true,
+        data: result,
+        count: result.length
+      };
+    } catch (error) {
+      logger.error('Error in StorageService.getBufferReport:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Получение отчета по некондиции
+   */
+  async getDefectsReport() {
+    try {
+      if (!this.repository) {
+        await this.initialize();
+      }
+
+      logger.info('Получение отчета по некондиции');
+
+      const result = await this.repository.getDefectsReport();
+
+      return {
+        success: true,
+        data: result,
+        count: result.length
+      };
+    } catch (error) {
+      logger.error('Error in StorageService.getDefectsReport:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Получение отчета по инвентаризациям
+   */
+  async getInventoryReport() {
+    try {
+      if (!this.repository) {
+        await this.initialize();
+      }
+
+      logger.info('Получение отчета по инвентаризациям');
+
+      const result = await this.repository.getInventoryReport();
+
+      return {
+        success: true,
+        data: result,
+        count: result.length
+      };
+    } catch (error) {
+      logger.error('Error in StorageService.getInventoryReport:', error);
       throw error;
     }
   }
