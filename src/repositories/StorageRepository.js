@@ -1218,13 +1218,13 @@ class StorageRepository {
 
       const query = `
         SELECT p.ID as productId, p.Name as productName, p.Article as article, p.SHK as shk,
-               b.prunitId, pt.typeName as prunitName, b.Product_QNT as quantity,
-               l.locationId, l.WR_SHK as wrShk, b.conditionState, b.Expiration_Date as expirationDate
+               b.prunitId, b.quantity,
+               l.locationId, l.locationCode, b.conditionState,
+               b.expirationDate, b.createdAt
         FROM [SPOe_rc].[dbo].[x_Storage_Full_Info] p
         JOIN [SPOe_rc].[dbo].[x_Storage_Buffer] b ON p.ID = b.productId
         JOIN [SPOe_rc].[dbo].[x_Storage_Locations] l ON b.locationId = l.locationId
-        JOIN [SPOe_rc].[dbo].[x_Storage_PrunitTypes] pt ON b.prunitId = pt.prunitId
-        WHERE b.Product_QNT > 0
+        WHERE b.quantity > 0 AND l.isBuffer = 1
         ORDER BY p.Name, l.locationId
       `;
 

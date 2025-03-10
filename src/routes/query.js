@@ -13,7 +13,7 @@ const { validate } = require('../middlewares/validator');
 
 /**
  * @swagger
- * /query/pick-article-rule:
+ * /api/query/pick-article-rule:
  *   get:
  *     summary: Получение правил отбора артикула
  *     description: Получает правила отбора артикула из таблицы wms.pick_article_rule по ID склада и артикула

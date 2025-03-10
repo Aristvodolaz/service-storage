@@ -13,7 +13,7 @@ const { validate } = require('../middlewares/validator');
 
 /**
  * @swagger
- * /storage/search:
+ * /api/storage/search:
  *   get:
  *     summary: Поиск товара по ШК или артикулу
  *     tags: [Склад]
@@ -46,7 +46,7 @@ router.get('/search', [
 
 /**
  * @swagger
- * /storage/{productId}/info:
+ * /api/storage/{productId}/info:
  *   get:
  *     summary: Получение информации о товаре
  *     tags: [Склад]
@@ -80,7 +80,7 @@ router.get('/:productId/info', [
 
 /**
  * @swagger
- * /storage/{productId}/units:
+ * /api/storage/{productId}/units:
  *   get:
  *     summary: Получение списка единиц хранения для артикула
  *     tags: [Склад]
@@ -108,7 +108,7 @@ router.get('/:productId/units', [
 
 /**
  * @swagger
- * /storage/{productId}/quantity:
+ * /api/storage/{productId}/quantity:
  *   put:
  *     summary: Обновление количества товара
  *     tags: [Склад]
@@ -154,7 +154,7 @@ router.put('/:productId/quantity', [
 
 /**
  * @swagger
- * /storage/{productId}/buffer:
+ * /api/storage/{productId}/buffer:
  *   post:
  *     summary: Размещение товара в буфер
  *     tags: [Склад]
@@ -210,7 +210,7 @@ router.post('/:productId/buffer', [
 
 /**
  * @swagger
- * /storage/{productId}/buffer/move:
+ * /api/storage/{productId}/buffer/move:
  *   post:
  *     summary: Перемещение товара между буферными ячейками
  *     tags: [Склад]
@@ -286,7 +286,7 @@ router.post('/:productId/buffer/move', [
 
 /**
  * @swagger
- * /storage/{productId}/location/pick:
+ * /api/storage/{productId}/location/pick:
  *   post:
  *     summary: Забор товара из ячейки
  *     tags: [Склад]
@@ -342,7 +342,7 @@ router.post('/:productId/location/pick', [
 
 /**
  * @swagger
- * /storage/search/article:
+ * /api/storage/search/article:
  *   get:
  *     summary: Поиск товара по артикулу
  *     tags: [Склад]
@@ -370,7 +370,7 @@ router.get('/search/article', [
 
 /**
  * @swagger
- * /storage/inventory/location/{locationId}:
+ * /api/storage/inventory/location/{locationId}:
  *   get:
  *     summary: Инвентаризация по ячейке
  *     tags: [Склад]
@@ -398,7 +398,7 @@ router.get('/inventory/location/:locationId', [
 
 /**
  * @swagger
- * /storage/inventory/article/{article}:
+ * /api/storage/inventory/article/{article}:
  *   get:
  *     summary: Инвентаризация по артикулу
  *     tags: [Склад]
@@ -426,7 +426,7 @@ router.get('/inventory/article/:article', [
 
 /**
  * @swagger
- * /storage/inventory/location/{locationId}/clear:
+ * /api/storage/inventory/location/{locationId}/clear:
  *   post:
  *     summary: Очистка ячейки (функция "Адрес пуст")
  *     tags: [Склад]
@@ -465,7 +465,7 @@ router.post('/inventory/location/:locationId/clear', [
 
 /**
  * @swagger
- * /storage/inventory/{productId}/{locationId}:
+ * /api/storage/inventory/{productId}/{locationId}:
  *   post:
  *     summary: Обновление данных инвентаризации
  *     tags: [Склад]
@@ -533,7 +533,7 @@ router.post('/inventory/:productId/:locationId', [
 
 /**
  * @swagger
- * /storage/item/details:
+ * /api/storage/item/details:
  *   get:
  *     summary: Получение детальной информации о товаре по ШК или артикулу
  *     tags: [Склад]
@@ -572,7 +572,7 @@ router.get('/item/details', [
 
 /**
  * @swagger
- * /storage/locations:
+ * /api/storage/locations:
  *   get:
  *     summary: Получение списка всех ячеек хранения
  *     tags: [Склад]
@@ -588,7 +588,7 @@ router.get('/locations', storageController.getAllLocations);
 
 /**
  * @swagger
- * /storage/defects/register:
+ * /api/storage/defects/register:
  *   post:
  *     summary: Регистрация некондиции
  *     description: Регистрирует некондицию для указанного товара
@@ -678,7 +678,7 @@ router.post('/defects/register', [
 
 /**
  * @swagger
- * /storage/reports/buffer:
+ * /api/storage/reports/buffer:
  *   get:
  *     summary: Отчет по остаткам в буфере
  *     description: Возвращает отчет по остаткам товаров в буфере
@@ -731,7 +731,7 @@ router.get('/reports/buffer', storageController.getBufferReport);
 
 /**
  * @swagger
- * /storage/reports/defects:
+ * /api/storage/reports/defects:
  *   get:
  *     summary: Отчет по некондиции
  *     description: Возвращает отчет по зарегистрированной некондиции
@@ -778,7 +778,7 @@ router.get('/reports/defects', storageController.getDefectsReport);
 
 /**
  * @swagger
- * /storage/reports/inventory:
+ * /api/storage/reports/inventory:
  *   get:
  *     summary: Отчет по инвентаризациям
  *     description: Возвращает отчет по проведенным инвентаризациям

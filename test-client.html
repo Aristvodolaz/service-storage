@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="ru">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Тестирование API складского сервиса</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+
+    h1,
+    h2,
+    h3 {
+      color: #333;
+    }
+
+    .container {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 20px;
+    }
+
+    .card {
+      flex: 1;
+      min-width: 300px;
+      border: 1px solid #ddd;
+      border-radius: 5px;
+      padding: 15px;
+      margin-bottom: 20px;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    }
+
+    .form-group {
+      margin-bottom: 15px;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 5px;
+      font-weight: bold;
+    }
+
+    input,
+    select {
+      width: 100%;
+      padding: 8px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      box-sizing: border-box;
+    }
+
+    button {
+      background-color: #4CAF50;
+      color: white;
+      padding: 10px 15px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background-color: #45a049;
+    }
+
+    pre {
+      background-color: #f5f5f5;
+      padding: 10px;
+      border-radius: 4px;
+      overflow-x: auto;
+      max-height: 300px;
+      overflow-y: auto;
+    }
+
+    .response {
+      margin-top: 15px;
+    }
+  </style>
+</head>
+
+<body>
+  <h1>Тестирование API складского сервиса</h1>
+
+  <div class="container">
+    <!-- Поиск товара -->
+    <div class="card">
+      <h2>Поиск товара</h2>
+      <form id="searchForm">
+        <div class="form-group">
+          <label for="searchShk">Штрих-код:</label>
+          <input type="text" id="searchShk" name="shk" placeholder="Введите штрих-код">
+        </div>
+        <div class="form-group">
+          <label for="searchArticle">Артикул:</label>
+          <input type="text" id="searchArticle" name="article" placeholder="Введите артикул">
+        </div>
+        <button type="submit">Найти</button>
+      </form>
+      <div class="response">
+        <h3>Ответ:</h3>
+        <pre id="searchResponse"></pre>
+      </div>
+    </div>
+
+    <!-- Детальная информация о товаре -->
+    <div class="card">
+      <h2>Детальная информация о товаре</h2>
+      <form id="detailsForm">
+        <div class="form-group">
+          <label for="detailsShk">Штрих-код:</label>
+          <input type="text" id="detailsShk" name="shk" placeholder="Введите штрих-код">
+        </div>
+        <div class="form-group">
+          <label for="detailsArticle">Артикул:</label>
+          <input type="text" id="detailsArticle" name="article" placeholder="Введите артикул">
+        </div>
+        <button type="submit">Получить информацию</button>
+      </form>
+      <div class="response">
+        <h3>Ответ:</h3>
+        <pre id="detailsResponse"></pre>
+      </div>
+    </div>
+  </div>
+
+  <div class="container">
+    <!-- Инвентаризация по ячейке -->
+    <div class="card">
+      <h2>Инвентаризация по ячейке</h2>
+      <form id="locationItemsForm">
+        <div class="form-group">
+          <label for="locationId">ID ячейки:</label>
+          <input type="text" id="locationId" name="locationId" placeholder="Введите ID ячейки" required>
+        </div>
+        <button type="submit">Получить товары в ячейке</button>
+      </form>
+      <div class="response">
+        <h3>Ответ:</h3>
+        <pre id="locationItemsResponse"></pre>
+      </div>
+    </div>
+
+    <!-- Инвентаризация по артикулу -->
+    <div class="card">
+      <h2>Инвентаризация по артикулу</h2>
+      <form id="articleLocationsForm">
+        <div class="form-group">
+          <label for="articleForLocations">Артикул:</label>
+          <input type="text" id="articleForLocations" name="article" placeholder="Введите артикул" required>
+        </div>
+        <button type="submit">Получить ячейки хранения</button>
+      </form>
+      <div class="response">
+        <h3>Ответ:</h3>
+        <pre id="articleLocationsResponse"></pre>
+      </div>
+    </div>
+  </div>
+
+  <div class="container">
+    <!-- Перемещение товара между ячейками -->
+    <div class="card">
+      <h2>Перемещение товара между ячейками</h2>
+      <form id="moveItemForm">
+        <div class="form-group">
+          <label for="moveProductId">ID товара:</label>
+          <input type="text" id="moveProductId" name="productId" placeholder="Введите ID товара" required>
+        </div>
+        <div class="form-group">
+          <label for="sourceLocationId">ID исходной ячейки:</label>
+          <input type="text" id="sourceLocationId" name="sourceLocationId" placeholder="Введите ID исходной ячейки"
+            required>
+        </div>
+        <div class="form-group">
+          <label for="targetLocationId">ID целевой ячейки:</label>
+          <input type="text" id="targetLocationId" name="targetLocationId" placeholder="Введите ID целевой ячейки"
+            required>
+        </div>
+        <div class="form-group">
+          <label for="movePrunitId">ID единицы хранения:</label>
+          <input type="text" id="movePrunitId" name="prunitId" placeholder="Введите ID единицы хранения" required>
+        </div>
+        <div class="form-group">
+          <label for="moveQuantity">Количество:</label>
+          <input type="number" id="moveQuantity" name="quantity" placeholder="Введите количество" required>
+        </div>
+        <div class="form-group">
+          <label for="moveConditionState">Состояние товара:</label>
+          <select id="moveConditionState" name="conditionState">
+            <option value="">Выберите состояние</option>
+            <option value="кондиция">Кондиция</option>
+            <option value="некондиция">Некондиция</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="moveExpirationDate">Срок годности:</label>
+          <input type="date" id="moveExpirationDate" name="expirationDate">
+        </div>
+        <div class="form-group">
+          <label for="moveExecutor">ID исполнителя:</label>
+          <input type="text" id="moveExecutor" name="executor" placeholder="Введите ID исполнителя" required>
+        </div>
+        <button type="submit">Переместить товар</button>
+      </form>
+      <div class="response">
+        <h3>Ответ:</h3>
+        <pre id="moveItemResponse"></pre>
+      </div>
+    </div>
+
+    <!-- Список всех ячеек -->
+    <div class="card">
+      <h2>Список всех ячеек хранения</h2>
+      <button id="getAllLocationsBtn">Получить список ячеек</button>
+      <div class="response">
+        <h3>Ответ:</h3>
+        <pre id="allLocationsResponse"></pre>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API_BASE_URL = 'http://localhost:3007/api/storage';
+
+    // Функция для отправки запроса и отображения ответа
+    async function sendRequest(url, method = 'GET', data = null, responseElementId) {
+      const responseElement = document.getElementById(responseElementId);
+      responseElement.textContent = 'Загрузка...';
+
+      try {
+        const options = {
+          method,
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        };
+
+        if (data) {
+          options.body = JSON.stringify(data);
+        }
+
+        const response = await fetch(url, options);
+        const result = await response.json();
+
+        responseElement.textContent = JSON.stringify(result, null, 2);
+      } catch (error) {
+        responseElement.textContent = `Ошибка: ${error.message}`;
+      }
+    }
+
+    // Поиск товара
+    document.getElementById('searchForm').addEventListener('submit', async function (e) {
+      e.preventDefault();
+      const shk = document.getElementById('searchShk').value;
+      const article = document.getElementById('searchArticle').value;
+
+      let url = `${API_BASE_URL}/search?`;
+      if (shk) url += `shk=${encodeURIComponent(shk)}&`;
+      if (article) url += `article=${encodeURIComponent(article)}`;
+
+      await sendRequest(url, 'GET', null, 'searchResponse');
+    });
+
+    // Детальная информация о товаре
+    document.getElementById('detailsForm').addEventListener('submit', async function (e) {
+      e.preventDefault();
+      const shk = document.getElementById('detailsShk').value;
+      const article = document.getElementById('detailsArticle').value;
+
+      let url = `${API_BASE_URL}/item/details?`;
+      if (shk) url += `shk=${encodeURIComponent(shk)}&`;
+      if (article) url += `article=${encodeURIComponent(article)}`;
+
+      await sendRequest(url, 'GET', null, 'detailsResponse');
+    });
+
+    // Инвентаризация по ячейке
+    document.getElementById('locationItemsForm').addEventListener('submit', async function (e) {
+      e.preventDefault();
+      const locationId = document.getElementById('locationId').value;
+
+      const url = `${API_BASE_URL}/inventory/location/${encodeURIComponent(locationId)}`;
+
+      await sendRequest(url, 'GET', null, 'locationItemsResponse');
+    });
+
+    // Инвентаризация по артикулу
+    document.getElementById('articleLocationsForm').addEventListener('submit', async function (e) {
+      e.preventDefault();
+      const article = document.getElementById('articleForLocations').value;
+
+      const url = `${API_BASE_URL}/inventory/article/${encodeURIComponent(article)}`;
+
+      await sendRequest(url, 'GET', null, 'articleLocationsResponse');
+    });
+
+    // Перемещение товара между ячейками
+    document.getElementById('moveItemForm').addEventListener('submit', async function (e) {
+      e.preventDefault();
+      const productId = document.getElementById('moveProductId').value;
+      const sourceLocationId = document.getElementById('sourceLocationId').value;
+      const targetLocationId = document.getElementById('targetLocationId').value;
+      const prunitId = document.getElementById('movePrunitId').value;
+      const quantity = document.getElementById('moveQuantity').value;
+      const conditionState = document.getElementById('moveConditionState').value;
+      const expirationDate = document.getElementById('moveExpirationDate').value;
+      const executor = document.getElementById('moveExecutor').value;
+
+      const url = `${API_BASE_URL}/${encodeURIComponent(productId)}/move`;
+
+      const data = {
+        sourceLocationId,
+        targetLocationId,
+        prunitId,
+        quantity: parseFloat(quantity),
+        executor
+      };
+
+      if (conditionState) data.conditionState = conditionState;
+      if (expirationDate) data.expirationDate = expirationDate;
+
+      await sendRequest(url, 'POST', data, 'moveItemResponse');
+    });
+
+    // Список всех ячеек
+    document.getElementById('getAllLocationsBtn').addEventListener('click', async function () {
+      const url = `${API_BASE_URL}/locations`;
+
+      await sendRequest(url, 'GET', null, 'allLocationsResponse');
+    });
+  </script>
+</body>
+
+</html>
