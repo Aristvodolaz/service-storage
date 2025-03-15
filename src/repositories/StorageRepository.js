@@ -320,7 +320,7 @@ class StorageRepository {
   }
 
   /**
-   * Получение остатков в буфере
+   * Получение остатков в буфере из x_Storage_Full_Info
    */
   async getBufferStock(productId) {
     try {
@@ -328,15 +328,17 @@ class StorageRepository {
 
       const query = `
         SELECT
-          productId,
-          prunitId,
-          locationId,
-          quantity,
-          conditionState,
-          expirationDate
-        FROM [SPOe_rc].[dbo].[x_Storage_Buffer]
-        WHERE productId = @productId
-        ORDER BY expirationDate DESC
+          ID as productId,
+          Prunit_Id as prunitId,
+          id_scklad as locationId,
+          Product_QNT as quantity,
+          Condition_State as conditionState,
+          Expiration_Date as expirationDate,
+          WR_SHK as wrShk
+        FROM [SPOe_rc].[dbo].[x_Storage_Full_Info]
+        WHERE ID = @productId
+          AND id_scklad LIKE 'BUFFER_%'
+        ORDER BY Expiration_Date DESC
       `;
 
       const result = await this.pool.request()
@@ -346,6 +348,42 @@ class StorageRepository {
       return result.recordset;
     } catch (error) {
       logger.error('Ошибка при получении остатков в буфере:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Получение отчета по остаткам в буфере из x_Storage_Full_Info
+   */
+  async getBufferReport() {
+    try {
+      logger.info('Получение отчета по остаткам в буфере');
+
+      const query = `
+        SELECT
+          p.ID as productId,
+          p.Name as productName,
+          p.Article as article,
+          p.SHK as shk,
+          p.Prunit_Id as prunitId,
+          p.Product_QNT as quantity,
+          p.id_scklad as locationId,
+          p.WR_SHK as wrShk,
+          p.Condition_State as conditionState,
+          p.Expiration_Date as expirationDate,
+          p.Create_Date as createdAt
+        FROM [SPOe_rc].[dbo].[x_Storage_Full_Info] p
+        WHERE p.Product_QNT > 0 AND p.id_scklad LIKE 'BUFFER_%'
+        ORDER BY p.Name, p.id_scklad
+      `;
+
+      logger.info('SQL запрос для получения отчета по остаткам в буфере:', query);
+      const result = await this.pool.request().query(query);
+      logger.info(`Получено записей: ${result.recordset.length}`);
+
+      return result.recordset;
+    } catch (error) {
+      logger.error('Error in getBufferReport:', error);
       throw error;
     }
   }
@@ -666,7 +704,7 @@ class StorageRepository {
             id,
             name,
             article_id_real as article,
-            PIECE_GTIN as shk,
+            PIECE_GTIN as shk
             prunit_id,
             prunit_name,
             product_qnt,
@@ -1213,36 +1251,6 @@ class StorageRepository {
   }
 
   /**
-   * Получение отчета по остаткам в буфере
-   */
-  async getBufferReport() {
-    try {
-      logger.info('Получение отчета по остаткам в буфере');
-
-      const query = `
-        SELECT p.ID as productId, p.Name as productName, p.Article as article, p.SHK as shk,
-               b.prunitId, b.quantity,
-               l.locationId, l.locationCode, b.conditionState,
-               b.expirationDate, b.createdAt
-        FROM [SPOe_rc].[dbo].[x_Storage_Full_Info] p
-        JOIN [SPOe_rc].[dbo].[x_Storage_Buffer] b ON p.ID = b.productId
-        JOIN [SPOe_rc].[dbo].[x_Storage_Locations] l ON b.locationId = l.locationId
-        WHERE b.quantity > 0 AND l.isBuffer = 1
-        ORDER BY p.Name, l.locationId
-      `;
-
-      logger.info('SQL запрос для получения отчета по остаткам в буфере:', query);
-      const result = await this.pool.request().query(query);
-      logger.info(`Получено записей: ${result.recordset.length}`);
-
-      return result.recordset;
-    } catch (error) {
-      logger.error('Error in getBufferReport:', error);
-      throw error;
-    }
-  }
-
-  /**
    * Получение отчета по некондиции
    */
   async getDefectsReport() {
@@ -1298,27 +1306,84 @@ class StorageRepository {
   }
 
   /**
-   * Добавление товара в буфер (x_Storage_Buffer)
+   * Добавление товара в буфер (x_Storage_Full_Info)
    */
   async addToBuffer(data) {
     try {
       logger.info('Добавление товара в буфер:', JSON.stringify(data));
 
-      const query = `
-        INSERT INTO [SPOe_rc].[dbo].[x_Storage_Buffer]
-        (productId, prunitId, locationId, quantity, expirationDate, conditionState, createdAt)
-        VALUES
-        (@productId, @prunitId, @locationId, @quantity, @expirationDate, @conditionState, GETDATE())
+      // Проверяем, существует ли уже запись
+      const checkQuery = `
+        SELECT ID, Product_QNT
+        FROM [SPOe_rc].[dbo].[x_Storage_Full_Info]
+        WHERE ID = @productId
+          AND Prunit_Id = @prunitId
+          AND id_scklad = @locationId
       `;
 
-      const result = await this.pool.request()
+      const checkResult = await this.pool.request()
         .input('productId', data.productId)
         .input('prunitId', data.prunitId)
         .input('locationId', data.locationId)
-        .input('quantity', data.quantity)
-        .input('expirationDate', data.expirationDate || null)
-        .input('conditionState', data.conditionState || 'кондиция')
-        .query(query);
+        .query(checkQuery);
+
+      if (checkResult.recordset.length > 0) {
+        // Запись уже существует, обновляем количество
+        const currentQuantity = checkResult.recordset[0].Product_QNT;
+        const newQuantity = parseFloat(currentQuantity) + data.quantity;
+
+        const updateQuery = `
+          UPDATE [SPOe_rc].[dbo].[x_Storage_Full_Info]
+          SET Product_QNT = @quantity,
+              Place_QNT = @quantity,
+              Condition_State = @conditionState,
+              Expiration_Date = @expirationDate,
+              WR_SHK = @wrShk,
+              Executor = @executor,
+              Update_Date = GETDATE()
+          WHERE ID = @productId
+            AND Prunit_Id = @prunitId
+            AND id_scklad = @locationId
+        `;
+
+        const updateResult = await this.pool.request()
+          .input('productId', data.productId)
+          .input('prunitId', data.prunitId)
+          .input('locationId', data.locationId)
+          .input('quantity', newQuantity)
+          .input('conditionState', data.conditionState || 'кондиция')
+          .input('expirationDate', data.expirationDate || null)
+          .input('wrShk', data.wrShk || null)
+          .input('executor', data.executor)
+          .query(updateQuery);
+
+        logger.info(`Обновлено количество товара в буфере: ${data.productId}, новое количество: ${newQuantity}`);
+        return updateResult.rowsAffected[0] > 0;
+      } else {
+        // Создаем новую запись
+        const insertQuery = `
+          INSERT INTO [SPOe_rc].[dbo].[x_Storage_Full_Info]
+          (ID, Prunit_Id, id_scklad, Product_QNT, Place_QNT, Condition_State,
+           Expiration_Date, WR_SHK, Executor, Create_Date, Update_Date)
+          VALUES
+          (@productId, @prunitId, @locationId, @quantity, @quantity, @conditionState,
+           @expirationDate, @wrShk, @executor, GETDATE(), GETDATE())
+        `;
+
+        const insertResult = await this.pool.request()
+          .input('productId', data.productId)
+          .input('prunitId', data.prunitId)
+          .input('locationId', data.locationId)
+          .input('quantity', data.quantity)
+          .input('conditionState', data.conditionState || 'кондиция')
+          .input('expirationDate', data.expirationDate || null)
+          .input('wrShk', data.wrShk || null)
+          .input('executor', data.executor)
+          .query(insertQuery);
+
+        logger.info(`Добавлен новый товар в буфер: ${data.productId}, количество: ${data.quantity}`);
+        return insertResult.rowsAffected[0] > 0;
+      }
 
       // Логируем операцию в x_Storage_Operations
       await this.logStorageOperation({
@@ -1333,7 +1398,7 @@ class StorageRepository {
         executor: data.executor
       });
 
-      return result.rowsAffected[0] > 0;
+      return true;
     } catch (error) {
       logger.error('Ошибка при добавлении товара в буфер:', error);
       throw error;
@@ -1341,20 +1406,24 @@ class StorageRepository {
   }
 
   /**
-   * Обновление количества товара в буфере (x_Storage_Buffer)
+   * Обновление количества товара в буфере (x_Storage_Full_Info)
    */
   async updateBufferQuantity(data) {
     try {
       logger.info('Обновление количества товара в буфере:', JSON.stringify(data));
 
       const query = `
-        UPDATE [SPOe_rc].[dbo].[x_Storage_Buffer]
-        SET quantity = @quantity,
-            expirationDate = @expirationDate,
-            conditionState = @conditionState
-        WHERE productId = @productId
-          AND prunitId = @prunitId
-          AND locationId = @locationId
+        UPDATE [SPOe_rc].[dbo].[x_Storage_Full_Info]
+        SET Product_QNT = @quantity,
+            Place_QNT = @quantity,
+            Condition_State = @conditionState,
+            Expiration_Date = @expirationDate,
+            WR_SHK = @wrShk,
+            Executor = @executor,
+            Update_Date = GETDATE()
+        WHERE ID = @productId
+          AND Prunit_Id = @prunitId
+          AND id_scklad = @locationId
       `;
 
       const result = await this.pool.request()
@@ -1362,8 +1431,10 @@ class StorageRepository {
         .input('prunitId', data.prunitId)
         .input('locationId', data.locationId)
         .input('quantity', data.quantity)
-        .input('expirationDate', data.expirationDate || null)
         .input('conditionState', data.conditionState || 'кондиция')
+        .input('expirationDate', data.expirationDate || null)
+        .input('wrShk', data.wrShk || null)
+        .input('executor', data.executor)
         .query(query);
 
       // Логируем операцию в x_Storage_Operations
@@ -1387,18 +1458,25 @@ class StorageRepository {
   }
 
   /**
-   * Проверка наличия товара в буфере
+   * Проверка наличия товара в буфере (x_Storage_Full_Info)
    */
   async checkBufferItem(productId, prunitId, locationId) {
     try {
       logger.info('Проверка наличия товара в буфере:', { productId, prunitId, locationId });
 
       const query = `
-        SELECT productId, prunitId, locationId, quantity, expirationDate, conditionState
-        FROM [SPOe_rc].[dbo].[x_Storage_Buffer]
-        WHERE productId = @productId
-          AND prunitId = @prunitId
-          AND locationId = @locationId
+        SELECT
+          ID as productId,
+          Prunit_Id as prunitId,
+          id_scklad as locationId,
+          Product_QNT as quantity,
+          Expiration_Date as expirationDate,
+          Condition_State as conditionState,
+          WR_SHK as wrShk
+        FROM [SPOe_rc].[dbo].[x_Storage_Full_Info]
+        WHERE ID = @productId
+          AND Prunit_Id = @prunitId
+          AND id_scklad = @locationId
       `;
 
       const result = await this.pool.request()
@@ -1480,20 +1558,20 @@ class StorageRepository {
   }
 
   /**
-   * Удаление товара из буфера
+   * Удаление товара из буфера (x_Storage_Full_Info)
    */
   async deleteFromBuffer(productId, prunitId, locationId) {
     try {
       const query = `
-        DELETE FROM x_Storage_Buffer
-        WHERE Product_Id = @productId
+        DELETE FROM [SPOe_rc].[dbo].[x_Storage_Full_Info]
+        WHERE ID = @productId
         AND Prunit_Id = @prunitId
-        AND Location_Id = @locationId
+        AND id_scklad = @locationId
       `;
 
       const request = this.pool.request();
       request.input('productId', sql.VarChar, productId);
-      request.input('prunitId', sql.VarChar, prunitId);
+      request.input('prunitId', sql.Int, prunitId);
       request.input('locationId', sql.VarChar, locationId);
 
       await request.query(query);

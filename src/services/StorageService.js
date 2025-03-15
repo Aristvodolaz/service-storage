@@ -313,9 +313,32 @@ class StorageService {
       if (typeof productId !== 'string') {
         throw new Error('Некорректный формат ID товара');
       }
-      if (typeof prunitId !== 'string') {
-        throw new Error('Некорректный формат ID единицы хранения');
+
+      // Преобразуем prunitId в числовой формат, если это строка с названием
+      let numericPrunitId = prunitId;
+      if (typeof prunitId === 'string') {
+        // Проверяем, является ли prunitId числом в строковом формате
+        if (!isNaN(parseInt(prunitId))) {
+          numericPrunitId = parseInt(prunitId);
+        } else {
+          // Если это название единицы хранения, преобразуем его в числовой ID
+          const prunitMap = {
+            'Единица': 1,
+            'Минимальная Упаковка': 2,
+            'Промежуточная Упаковка': 3,
+            'Фабричная Упаковка': 10,
+            'Паллет': 11
+          };
+
+          if (prunitMap[prunitId]) {
+            numericPrunitId = prunitMap[prunitId];
+            logger.info(`Преобразовано название единицы хранения "${prunitId}" в ID: ${numericPrunitId}`);
+          } else {
+            throw new Error(`Неизвестная единица хранения: ${prunitId}`);
+          }
+        }
       }
+
       if (typeof quantity !== 'number' || quantity <= 0) {
         throw new Error('Некорректное количество');
       }
@@ -332,34 +355,21 @@ class StorageService {
         throw new Error('Некорректный формат срока годности');
       }
 
-      // Получаем информацию о местоположении по штрих-коду
-      logger.info(`Проверка существования местоположения с штрих-кодом: ${wrShk}`);
-      const location = await this.repository.getLocationByWrShk(wrShk);
-      logger.info(`Результат проверки местоположения: ${JSON.stringify(location)}`);
+      // Используем переданный штрих-код напрямую
+      logger.info(`Используем штрих-код места хранения: ${wrShk}`);
 
-      if (!location) {
-        logger.warn(`Местоположение с штрих-кодом ${wrShk} не найдено`);
-        return {
-          success: false,
-          errorCode: 404,
-          msg: `Местоположение с штрих-кодом ${wrShk} не найдено`
-        };
-      }
+      // Создаем объект местоположения
+      const location = {
+        locationId: `BUFFER_${wrShk}`,
+        isBuffer: true
+      };
 
-      // Проверяем, является ли местоположение буферным
-      if (!location.isBuffer) {
-        logger.warn(`Местоположение ${wrShk} не является буферной зоной`);
-        return {
-          success: false,
-          errorCode: 400,
-          msg: 'Указанное местоположение не является буферной зоной'
-        };
-      }
+      logger.info(`Создано местоположение: ${JSON.stringify(location)}`);
 
       const locationId = location.locationId;
 
       // Проверяем, есть ли уже товар в указанной ячейке
-      const existingItem = await this.repository.checkBufferItem(productId, prunitId, locationId);
+      const existingItem = await this.repository.checkBufferItem(productId, numericPrunitId, locationId);
 
       let result;
 
@@ -370,11 +380,12 @@ class StorageService {
         // Обновляем запись
         result = await this.repository.updateBufferQuantity({
           productId,
-          prunitId,
+          prunitId: numericPrunitId,
           locationId,
           quantity: newQuantity,
           conditionState: conditionState || existingItem.conditionState || 'кондиция',
           expirationDate: expirationDate || existingItem.expirationDate,
+          wrShk,
           executor
         });
 
@@ -402,11 +413,12 @@ class StorageService {
         // Товара нет в ячейке, создаем новую запись
         result = await this.repository.addToBuffer({
           productId,
-          prunitId,
+          prunitId: numericPrunitId,
           locationId,
           quantity,
           conditionState: conditionState || 'кондиция',
           expirationDate: expirationDate || null,
+          wrShk,
           executor
         });
 
@@ -455,9 +467,32 @@ class StorageService {
       if (typeof productId !== 'string') {
         throw new Error('Некорректный формат ID товара');
       }
-      if (typeof prunitId !== 'string') {
-        throw new Error('Некорректный формат ID единицы хранения');
+
+      // Преобразуем prunitId в числовой формат, если это строка с названием
+      let numericPrunitId = prunitId;
+      if (typeof prunitId === 'string') {
+        // Проверяем, является ли prunitId числом в строковом формате
+        if (!isNaN(parseInt(prunitId))) {
+          numericPrunitId = parseInt(prunitId);
+        } else {
+          // Если это название единицы хранения, преобразуем его в числовой ID
+          const prunitMap = {
+            'Единица': 1,
+            'Минимальная Упаковка': 2,
+            'Промежуточная Упаковка': 3,
+            'Фабричная Упаковка': 10,
+            'Паллет': 11
+          };
+
+          if (prunitMap[prunitId]) {
+            numericPrunitId = prunitMap[prunitId];
+            logger.info(`Преобразовано название единицы хранения "${prunitId}" в ID: ${numericPrunitId}`);
+          } else {
+            throw new Error(`Неизвестная единица хранения: ${prunitId}`);
+          }
+        }
       }
+
       if (typeof quantity !== 'number' || quantity <= 0) {
         throw new Error('Некорректное количество');
       }
@@ -484,7 +519,7 @@ class StorageService {
 
       // Ищем товар в указанном местоположении
       const bufferItem = bufferStock.find(item =>
-        item.prunitId === prunitId &&
+        item.prunitId === numericPrunitId &&
         item.locationId === locationId
       );
 
@@ -520,16 +555,17 @@ class StorageService {
         // Если это полное изъятие, удаляем запись из буфера
         if (isFullRemoval) {
           // Удаляем запись из буфера
-          await this.repository.deleteFromBuffer(productId, prunitId, locationId);
+          await this.repository.deleteFromBuffer(productId, numericPrunitId, locationId);
         } else {
           // Обновляем количество в буфере
           await this.repository.updateBufferQuantity({
             productId,
-            prunitId,
+            prunitId: numericPrunitId,
             locationId,
             quantity: newQuantity,
             conditionState: bufferItem.conditionState,
             expirationDate: bufferItem.expirationDate,
+            wrShk: bufferItem.wrShk,
             executor
           });
         }
@@ -538,7 +574,7 @@ class StorageService {
         await this.repository.logStorageOperation({
           operationType: 'изъятие_некондиция',
           productId,
-          prunitId,
+          prunitId: numericPrunitId,
           fromLocationId: locationId,
           toLocationId: null,
           quantity,
@@ -552,7 +588,7 @@ class StorageService {
           msg: 'Товар помечен как некондиция и изъят из буфера',
           data: {
             productId,
-            prunitId,
+            prunitId: numericPrunitId,
             locationId,
             removedQuantity: quantity,
             remainingQuantity: newQuantity,
@@ -577,16 +613,17 @@ class StorageService {
         // Если это полное изъятие, удаляем запись из буфера
         if (isFullRemoval) {
           // Удаляем запись из буфера
-          await this.repository.deleteFromBuffer(productId, prunitId, locationId);
+          await this.repository.deleteFromBuffer(productId, numericPrunitId, locationId);
         } else {
           // Обновляем количество в буфере
           await this.repository.updateBufferQuantity({
             productId,
-            prunitId,
+            prunitId: numericPrunitId,
             locationId,
             quantity: newQuantity,
             conditionState: bufferItem.conditionState,
             expirationDate: bufferItem.expirationDate,
+            wrShk: bufferItem.wrShk,
             executor
           });
         }
@@ -594,7 +631,7 @@ class StorageService {
         // Добавляем товар в зону комплектации
         await this.repository.addToLocation({
           productId,
-          prunitId,
+          prunitId: numericPrunitId,
           locationId: targetLocationId,
           quantity,
           conditionState: 'кондиция',
@@ -606,7 +643,7 @@ class StorageService {
         await this.repository.logStorageOperation({
           operationType: 'перемещение',
           productId,
-          prunitId,
+          prunitId: numericPrunitId,
           fromLocationId: locationId,
           toLocationId: targetLocationId,
           quantity,
@@ -620,7 +657,7 @@ class StorageService {
           msg: 'Товар перемещен из буфера в зону комплектации',
           data: {
             productId,
-            prunitId,
+            prunitId: numericPrunitId,
             fromLocationId: locationId,
             toLocationId: targetLocationId,
             quantity,

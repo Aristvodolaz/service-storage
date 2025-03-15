@@ -172,33 +172,67 @@ class StorageController {
         expirationDate
       });
 
+      // Проверяем наличие обязательных параметров
       if (!productId || !prunitId || !quantity || !executor || !wrShk) {
         logger.warn('Не указаны обязательные параметры');
         return res.status(400).json({
           success: false,
           errorCode: 400,
-          msg: 'Необходимо указать все обязательные параметры'
+          msg: 'Необходимо указать все обязательные параметры (productId, prunitId, quantity, executor, wrShk)'
         });
       }
 
       // Проверка корректности состояния товара
-      if (conditionState && !['кондиция', 'некондиция'].includes(conditionState)) {
-        logger.warn('Некорректное значение состояния товара:', conditionState);
-        return res.status(400).json({
-          success: false,
-          errorCode: 400,
-          msg: 'Некорректное значение состояния товара'
-        });
+      if (conditionState) {
+        // Преобразуем значения для совместимости
+        let normalizedCondition = conditionState.toLowerCase();
+        if (normalizedCondition === 'bad' || normalizedCondition === 'некондиция') {
+          normalizedCondition = 'некондиция';
+        } else if (normalizedCondition === 'good' || normalizedCondition === 'кондиция') {
+          normalizedCondition = 'кондиция';
+        } else {
+          logger.warn('Некорректное значение состояния товара:', conditionState);
+          return res.status(400).json({
+            success: false,
+            errorCode: 400,
+            msg: 'Некорректное значение состояния товара. Допустимые значения: "кондиция", "некондиция", "good", "bad"'
+          });
+        }
+        req.body.conditionState = normalizedCondition;
       }
 
       // Проверка корректности дат
-      if (expirationDate && isNaN(Date.parse(expirationDate))) {
-        logger.warn('Некорректный формат срока годности:', expirationDate);
-        return res.status(400).json({
-          success: false,
-          errorCode: 400,
-          msg: 'Некорректный формат срока годности'
-        });
+      let parsedDate = null;
+      if (expirationDate) {
+        // Пробуем разные форматы даты
+        if (!isNaN(Date.parse(expirationDate))) {
+          // Стандартный формат ISO
+          parsedDate = new Date(expirationDate);
+        } else {
+          // Пробуем формат DD.MM.YYYY
+          const parts = expirationDate.split('.');
+          if (parts.length === 3) {
+            const day = parseInt(parts[0], 10);
+            const month = parseInt(parts[1], 10) - 1; // месяцы в JS начинаются с 0
+            const year = parseInt(parts[2], 10);
+
+            if (!isNaN(day) && !isNaN(month) && !isNaN(year)) {
+              parsedDate = new Date(year, month, day);
+            }
+          }
+        }
+
+        if (!parsedDate || isNaN(parsedDate.getTime())) {
+          logger.warn('Некорректный формат срока годности:', expirationDate);
+          return res.status(400).json({
+            success: false,
+            errorCode: 400,
+            msg: 'Некорректный формат срока годности. Используйте формат YYYY-MM-DD или DD.MM.YYYY'
+          });
+        }
+
+        // Преобразуем дату в формат ISO для дальнейшей обработки
+        req.body.expirationDate = parsedDate.toISOString().split('T')[0];
       }
 
       const result = await storageService.moveToBuffer({
@@ -207,8 +241,8 @@ class StorageController {
         quantity,
         executor,
         wrShk,
-        conditionState,
-        expirationDate
+        conditionState: req.body.conditionState,
+        expirationDate: req.body.expirationDate
       });
 
       if (!result.success) {
