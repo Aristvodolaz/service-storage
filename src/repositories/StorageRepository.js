@@ -1291,6 +1291,7 @@ class StorageRepository {
       let productArticle = data.article || '';
       let productShk = data.shk || '';
       let prunitName = '';
+      let skladId = data.sklad_id || null;
 
       // Если не переданы необходимые данные, запрашиваем их из базы
       if (!productName || !productArticle || !productShk) {
@@ -1371,12 +1372,13 @@ class StorageRepository {
               WR_SHK = @wrShk,
               Executor = @executor,
               Update_Date = GETDATE()
+              ${skladId ? ', id_scklad = @skladId' : ''}
           WHERE ID = @productId
             AND Prunit_Id = @prunitId
             AND id_scklad = @locationId
         `;
 
-        const updateResult = await this.pool.request()
+        const updateRequest = this.pool.request()
           .input('productId', data.productId)
           .input('prunitId', data.prunitId)
           .input('locationId', data.locationId)
@@ -1384,23 +1386,41 @@ class StorageRepository {
           .input('conditionState', data.conditionState || 'кондиция')
           .input('expirationDate', data.expirationDate || null)
           .input('wrShk', data.wrShk || null)
-          .input('executor', data.executor)
-          .query(updateQuery);
+          .input('executor', data.executor);
+
+        if (skladId) {
+          updateRequest.input('skladId', skladId);
+        }
+
+        const updateResult = await updateRequest.query(updateQuery);
 
         logger.info(`Обновлено количество товара в буфере: ${data.productId}, новое количество: ${newQuantity}`);
         return updateResult.rowsAffected[0] > 0;
       } else {
         // Создаем новую запись
-        const insertQuery = `
-          INSERT INTO [SPOe_rc].[dbo].[x_Storage_Full_Info]
-          (ID, Name, Article, SHK, Prunit_Id, Prunit_Name, id_scklad, Product_QNT, Place_QNT, Condition_State,
-           Expiration_Date, WR_SHK, Executor, Create_Date, Update_Date)
-          VALUES
-          (@productId, @name, @article, @shk, @prunitId, @prunitName, @locationId, @quantity, @quantity, @conditionState,
-           @expirationDate, @wrShk, @executor, GETDATE(), GETDATE())
+        let insertFields = `
+          ID, Name, Article, SHK, Prunit_Id, Prunit_Name, id_scklad, Product_QNT, Place_QNT, Condition_State,
+          Expiration_Date, WR_SHK, Executor, Create_Date, Update_Date
         `;
 
-        const insertResult = await this.pool.request()
+        let insertValues = `
+          @productId, @name, @article, @shk, @prunitId, @prunitName, @locationId, @quantity, @quantity, @conditionState,
+          @expirationDate, @wrShk, @executor, GETDATE(), GETDATE()
+        `;
+
+        if (skladId) {
+          insertFields += `, id_scklad`;
+          insertValues += `, @skladId`;
+        }
+
+        const insertQuery = `
+          INSERT INTO [SPOe_rc].[dbo].[x_Storage_Full_Info]
+          (${insertFields})
+          VALUES
+          (${insertValues})
+        `;
+
+        const insertRequest = this.pool.request()
           .input('productId', data.productId)
           .input('name', productName)
           .input('article', productArticle)
@@ -1412,8 +1432,13 @@ class StorageRepository {
           .input('conditionState', data.conditionState || 'кондиция')
           .input('expirationDate', data.expirationDate || null)
           .input('wrShk', data.wrShk || null)
-          .input('executor', data.executor)
-          .query(insertQuery);
+          .input('executor', data.executor);
+
+        if (skladId) {
+          insertRequest.input('skladId', skladId);
+        }
+
+        const insertResult = await insertRequest.query(insertQuery);
 
         logger.info(`Добавлен новый товар в буфер: ${data.productId}, количество: ${data.quantity}`);
         return insertResult.rowsAffected[0] > 0;
@@ -1479,6 +1504,10 @@ class StorageRepository {
         updateFields += `, SHK = @shk`;
       }
 
+      if (data.sklad_id) {
+        updateFields += `, id_scklad = @sklad_id`;
+      }
+
       const query = `
         UPDATE [SPOe_rc].[dbo].[x_Storage_Full_Info]
         SET ${updateFields}
@@ -1514,6 +1543,10 @@ class StorageRepository {
 
       if (data.shk) {
         request.input('shk', data.shk);
+      }
+
+      if (data.sklad_id) {
+        request.input('sklad_id', data.sklad_id);
       }
 
       const result = await request.query(query);

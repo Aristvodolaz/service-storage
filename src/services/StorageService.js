@@ -353,7 +353,9 @@ class StorageService {
 
       if (existingItem) {
         // Товар уже есть в ячейке, обновляем количество
-        const newQuantity = existingItem.quantity + quantity;
+        const currentQuantity = parseFloat(existingItem.quantity) || 0;
+        const numericQuantity = parseFloat(quantity) || 0;
+        const newQuantity = currentQuantity + numericQuantity;
 
         // Обновляем запись
         result = await this.repository.updateBufferQuantity({

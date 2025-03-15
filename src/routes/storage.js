@@ -232,6 +232,18 @@ router.put('/:productId/quantity', [
  *               expirationDate:
  *                 type: string
  *                 description: Срок годности (формат YYYY-MM-DD или DD.MM.YYYY)
+ *               name:
+ *                 type: string
+ *                 description: Наименование товара (если не указано, будет получено из базы данных)
+ *               article:
+ *                 type: string
+ *                 description: Артикул товара (если не указан, будет получен из базы данных)
+ *               shk:
+ *                 type: string
+ *                 description: Штрих-код товара (если не указан, будет получен из базы данных)
+ *               sklad_id:
+ *                 type: string
+ *                 description: ID склада (соответствует полю id_scklad в базе данных)
  *     responses:
  *       200:
  *         description: Товар успешно размещен в буфер
@@ -284,6 +296,10 @@ router.post('/:productId/buffer', [
     // Принимаем любые строки, контроллер сам проверит формат
     return true;
   }),
+  body('name').optional().isString(),
+  body('article').optional().isString(),
+  body('shk').optional().isString(),
+  body('sklad_id').optional().isString(),
   validate
 ], storageController.moveToBuffer);
 
