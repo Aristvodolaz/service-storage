@@ -729,22 +729,17 @@ class StorageRepository {
         isNewItem = true;
 
         // Получаем информацию о товаре
-        const productQuery = `
-          SELECT * FROM OPENQUERY(OW,
-            'SELECT
-              id,
-              name,
-              article_id_real as article,
-              PIECE_GTIN as shk
-            FROM wms.article
-            WHERE id = ''${productId}'''
-          )
+        const productInfoQuery = `
+          SELECT TOP 1 Name, Article, SHK FROM [SPOe_rc].[dbo].[x_Storage_Full_Info]
+          WHERE ID = @productId
         `;
 
-        logger.info('SQL запрос для получения информации о товаре:', productQuery);
-        const productResult = await this.pool.request().query(productQuery);
+        logger.info('SQL запрос для получения информации о товаре:', productInfoQuery);
+        const productInfoResult = await this.pool.request()
+          .input('productId', productId)
+          .query(productInfoQuery);
 
-        if (productResult.recordset.length === 0) {
+        if (productInfoResult.recordset.length === 0) {
           logger.warn(`Товар с ID ${productId} не найден`);
           return null;
         }
@@ -1312,6 +1307,46 @@ class StorageRepository {
     try {
       logger.info('Добавление товара в буфер:', JSON.stringify(data));
 
+      // Получаем информацию о товаре
+      const productInfoQuery = `
+        SELECT * FROM OPENQUERY(OW,
+          'SELECT
+            id,
+            name,
+            article_id_real as article,
+            PIECE_GTIN as shk
+          FROM wms.article
+          WHERE id = ''${data.productId}''
+          AND article_id_real = id'
+        )
+      `;
+
+      let productName = '';
+      let productArticle = '';
+      let productShk = '';
+      let prunitName = '';
+
+      try {
+        const productInfoResult = await this.pool.request().query(productInfoQuery);
+
+        if (productInfoResult.recordset.length > 0) {
+          productName = productInfoResult.recordset[0].name || '';
+          productArticle = productInfoResult.recordset[0].article || '';
+          productShk = productInfoResult.recordset[0].shk || '';
+        }
+      } catch (error) {
+        logger.warn('Не удалось получить информацию о товаре:', error.message);
+      }
+
+      // Получаем название единицы хранения
+      try {
+        const prunitTypeId = typeof data.prunitId === 'number' ? data.prunitId : parseInt(data.prunitId);
+        const prunitInfo = this.getPrunitTypeText(prunitTypeId);
+        prunitName = prunitInfo.name || '';
+      } catch (error) {
+        logger.warn('Не удалось получить название единицы хранения:', error.message);
+      }
+
       // Проверяем, существует ли уже запись
       const checkQuery = `
         SELECT ID, Product_QNT
@@ -1363,16 +1398,20 @@ class StorageRepository {
         // Создаем новую запись
         const insertQuery = `
           INSERT INTO [SPOe_rc].[dbo].[x_Storage_Full_Info]
-          (ID, Prunit_Id, id_scklad, Product_QNT, Place_QNT, Condition_State,
+          (ID, Name, Article, SHK, Prunit_Id, Prunit_Name, id_scklad, Product_QNT, Place_QNT, Condition_State,
            Expiration_Date, WR_SHK, Executor, Create_Date, Update_Date)
           VALUES
-          (@productId, @prunitId, @locationId, @quantity, @quantity, @conditionState,
+          (@productId, @name, @article, @shk, @prunitId, @prunitName, @locationId, @quantity, @quantity, @conditionState,
            @expirationDate, @wrShk, @executor, GETDATE(), GETDATE())
         `;
 
         const insertResult = await this.pool.request()
           .input('productId', data.productId)
+          .input('name', productName)
+          .input('article', productArticle)
+          .input('shk', productShk)
           .input('prunitId', data.prunitId)
+          .input('prunitName', prunitName)
           .input('locationId', data.locationId)
           .input('quantity', data.quantity)
           .input('conditionState', data.conditionState || 'кондиция')
