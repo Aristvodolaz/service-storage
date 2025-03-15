@@ -303,7 +303,10 @@ class StorageService {
         executor,
         wrShk,
         conditionState,
-        expirationDate
+        expirationDate,
+        name,
+        article,
+        shk
       } = params;
 
       logger.info('Начало выполнения moveToBuffer');
@@ -361,7 +364,10 @@ class StorageService {
           conditionState: conditionState || existingItem.conditionState || 'кондиция',
           expirationDate: expirationDate || existingItem.expirationDate,
           wrShk,
-          executor
+          executor,
+          name,
+          article,
+          shk
         });
 
         if (!result) {
@@ -394,7 +400,10 @@ class StorageService {
           conditionState: conditionState || 'кондиция',
           expirationDate: expirationDate || null,
           wrShk,
-          executor
+          executor,
+          name,
+          article,
+          shk
         });
 
         if (!result) {

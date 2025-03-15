@@ -1201,46 +1201,25 @@ class StorageRepository {
     try {
       const { productId, defectReason, executor } = params;
 
-      logger.info('Регистрация некондиции:', JSON.stringify(params));
-
-      // Проверяем существование товара
-      const checkQuery = `
-        SELECT * FROM OPENQUERY(OW,
-          'SELECT
-            id,
-            name,
-            article_id_real as article
-          FROM wms.article
-          WHERE id = ''${productId}'''
+      const query = `
+        INSERT INTO x_Storage_Defects (
+          Product_Id, Defect_Reason, Executor, Create_Date
+        )
+        VALUES (
+          @productId, @defectReason, @executor, GETDATE()
         )
       `;
 
-      logger.info('SQL запрос для проверки существования товара:', checkQuery);
-      const checkResult = await this.pool.request().query(checkQuery);
+      const request = this.pool.request();
+      request.input('productId', sql.VarChar, productId);
+      request.input('defectReason', sql.VarChar, defectReason);
+      request.input('executor', sql.VarChar, executor);
 
-      if (checkResult.recordset.length === 0) {
-        logger.warn(`Товар с ID ${productId} не найден`);
-        return null;
-      }
-
-      // Регистрируем некондицию
-      const query = `
-        INSERT INTO [SPOe_rc].[dbo].[x_Storage_Defects]
-        (productId, defectReason, executor, registrationDate)
-        VALUES
-        (@productId, @defectReason, @executor, GETDATE())
-      `;
-
-      logger.info('SQL запрос для регистрации некондиции:', query);
-      const result = await this.pool.request()
-        .input('productId', productId)
-        .input('defectReason', defectReason)
-        .input('executor', executor)
-        .query(query);
-
-      return result.rowsAffected[0] > 0;
+      await request.query(query);
+      logger.info(`Зарегистрирована некондиция для товара: ${productId}, причина: ${defectReason}`);
+      return true;
     } catch (error) {
-      logger.error('Error in registerDefect:', error);
+      logger.error('Ошибка при регистрации некондиции:', error);
       throw error;
     }
   }
@@ -1307,44 +1286,60 @@ class StorageRepository {
     try {
       logger.info('Добавление товара в буфер:', JSON.stringify(data));
 
-      // Получаем информацию о товаре
-      const productInfoQuery = `
-        SELECT * FROM OPENQUERY(OW,
-          'SELECT
-            id,
-            name,
-            article_id_real as article,
-            PIECE_GTIN as shk
-          FROM wms.article
-          WHERE id = ''${data.productId}''
-          AND article_id_real = id'
-        )
-      `;
-
-      let productName = '';
-      let productArticle = '';
-      let productShk = '';
+      // Используем переданные значения или получаем информацию о товаре из базы данных
+      let productName = data.name || '';
+      let productArticle = data.article || '';
+      let productShk = data.shk || '';
       let prunitName = '';
 
-      try {
-        const productInfoResult = await this.pool.request().query(productInfoQuery);
+      // Если не переданы необходимые данные, запрашиваем их из базы
+      if (!productName || !productArticle || !productShk) {
+        try {
+          const productInfoQuery = `
+            SELECT * FROM OPENQUERY(OW,
+              'SELECT
+                id,
+                name,
+                article_id_real as article,
+                PIECE_GTIN as shk
+              FROM wms.article
+              WHERE id = ''${data.productId}''
+              AND article_id_real = id'
+            )
+          `;
 
-        if (productInfoResult.recordset.length > 0) {
-          productName = productInfoResult.recordset[0].name || '';
-          productArticle = productInfoResult.recordset[0].article || '';
-          productShk = productInfoResult.recordset[0].shk || '';
+          const productInfoResult = await this.pool.request().query(productInfoQuery);
+
+          if (productInfoResult.recordset.length > 0) {
+            productName = productName || productInfoResult.recordset[0].name || '';
+            productArticle = productArticle || productInfoResult.recordset[0].article || '';
+            productShk = productShk || productInfoResult.recordset[0].shk || '';
+          }
+        } catch (error) {
+          logger.warn('Не удалось получить информацию о товаре:', error.message);
         }
-      } catch (error) {
-        logger.warn('Не удалось получить информацию о товаре:', error.message);
       }
 
       // Получаем название единицы хранения
       try {
-        const prunitTypeId = typeof data.prunitId === 'number' ? data.prunitId : parseInt(data.prunitId);
+        // Проверяем, является ли prunitId числом или строкой, содержащей число
+        let prunitTypeId;
+        if (typeof data.prunitId === 'number') {
+          prunitTypeId = data.prunitId;
+        } else if (typeof data.prunitId === 'string' && /^\d+$/.test(data.prunitId) && parseInt(data.prunitId) <= 2147483647) {
+          // Если это строка с числом и оно не превышает максимальное значение int
+          prunitTypeId = parseInt(data.prunitId);
+        } else {
+          // Если это строка с большим числом или нечисловая строка, используем значение по умолчанию
+          prunitTypeId = 0;
+          logger.warn(`prunitId "${data.prunitId}" не может быть преобразован в допустимый тип единицы хранения, используется значение по умолчанию`);
+        }
+
         const prunitInfo = this.getPrunitTypeText(prunitTypeId);
         prunitName = prunitInfo.name || '';
       } catch (error) {
         logger.warn('Не удалось получить название единицы хранения:', error.message);
+        prunitName = 'Неизвестная единица';
       }
 
       // Проверяем, существует ли уже запись
@@ -1364,8 +1359,8 @@ class StorageRepository {
 
       if (checkResult.recordset.length > 0) {
         // Запись уже существует, обновляем количество
-        const currentQuantity = checkResult.recordset[0].Product_QNT;
-        const newQuantity = parseFloat(currentQuantity) + data.quantity;
+        const currentQuantity = parseFloat(checkResult.recordset[0].Product_QNT) || 0;
+        const newQuantity = currentQuantity + parseFloat(data.quantity) || 0;
 
         const updateQuery = `
           UPDATE [SPOe_rc].[dbo].[x_Storage_Full_Info]
@@ -1451,30 +1446,77 @@ class StorageRepository {
     try {
       logger.info('Обновление количества товара в буфере:', JSON.stringify(data));
 
+      // Убедимся, что quantity - это число
+      const quantity = parseFloat(data.quantity) || 0;
+
+      // Базовый запрос на обновление
+      let updateFields = `
+        Product_QNT = @quantity,
+        Place_QNT = @quantity,
+        Condition_State = @conditionState,
+        Executor = @executor,
+        Update_Date = GETDATE()
+      `;
+
+      // Добавляем дополнительные поля, если они переданы
+      if (data.wrShk) {
+        updateFields += `, WR_SHK = @wrShk`;
+      }
+
+      if (data.expirationDate) {
+        updateFields += `, Expiration_Date = @expirationDate`;
+      }
+
+      if (data.name) {
+        updateFields += `, Name = @name`;
+      }
+
+      if (data.article) {
+        updateFields += `, Article = @article`;
+      }
+
+      if (data.shk) {
+        updateFields += `, SHK = @shk`;
+      }
+
       const query = `
         UPDATE [SPOe_rc].[dbo].[x_Storage_Full_Info]
-        SET Product_QNT = @quantity,
-            Place_QNT = @quantity,
-            Condition_State = @conditionState,
-            Expiration_Date = @expirationDate,
-            WR_SHK = @wrShk,
-            Executor = @executor,
-            Update_Date = GETDATE()
+        SET ${updateFields}
         WHERE ID = @productId
           AND Prunit_Id = @prunitId
           AND id_scklad = @locationId
       `;
 
-      const result = await this.pool.request()
+      const request = this.pool.request()
         .input('productId', data.productId)
         .input('prunitId', data.prunitId)
         .input('locationId', data.locationId)
-        .input('quantity', data.quantity)
+        .input('quantity', quantity)
         .input('conditionState', data.conditionState || 'кондиция')
-        .input('expirationDate', data.expirationDate || null)
-        .input('wrShk', data.wrShk || null)
-        .input('executor', data.executor)
-        .query(query);
+        .input('executor', data.executor);
+
+      // Добавляем параметры, если они переданы
+      if (data.wrShk) {
+        request.input('wrShk', data.wrShk);
+      }
+
+      if (data.expirationDate) {
+        request.input('expirationDate', data.expirationDate);
+      }
+
+      if (data.name) {
+        request.input('name', data.name);
+      }
+
+      if (data.article) {
+        request.input('article', data.article);
+      }
+
+      if (data.shk) {
+        request.input('shk', data.shk);
+      }
+
+      const result = await request.query(query);
 
       // Логируем операцию в x_Storage_Operations
       await this.logStorageOperation({
@@ -1610,7 +1652,7 @@ class StorageRepository {
 
       const request = this.pool.request();
       request.input('productId', sql.VarChar, productId);
-      request.input('prunitId', sql.Int, prunitId);
+      request.input('prunitId', sql.VarChar, prunitId);
       request.input('locationId', sql.VarChar, locationId);
 
       await request.query(query);
@@ -1629,6 +1671,9 @@ class StorageRepository {
     try {
       const { productId, prunitId, locationId, quantity, conditionState, expirationDate, executor } = params;
 
+      // Преобразуем quantity в число
+      const numericQuantity = parseFloat(quantity) || 0;
+
       // Проверяем, существует ли уже такой товар в указанном местоположении
       const checkQuery = `
         SELECT Product_QNT FROM x_Storage_Full_Info
@@ -1646,8 +1691,8 @@ class StorageRepository {
 
       if (result.recordset.length > 0) {
         // Товар уже существует, обновляем количество
-        const currentQuantity = result.recordset[0].Product_QNT;
-        const newQuantity = currentQuantity + quantity;
+        const currentQuantity = parseFloat(result.recordset[0].Product_QNT) || 0;
+        const newQuantity = currentQuantity + numericQuantity;
 
         const updateQuery = `
           UPDATE x_Storage_Full_Info
@@ -1690,91 +1735,18 @@ class StorageRepository {
         insertRequest.input('productId', sql.VarChar, productId);
         insertRequest.input('prunitId', sql.VarChar, prunitId);
         insertRequest.input('locationId', sql.VarChar, locationId);
-        insertRequest.input('quantity', sql.Float, quantity);
+        insertRequest.input('quantity', sql.Float, numericQuantity);
         insertRequest.input('conditionState', sql.VarChar, conditionState);
         insertRequest.input('expirationDate', sql.Date, expirationDate);
         insertRequest.input('executor', sql.VarChar, executor);
 
         await insertRequest.query(insertQuery);
-        logger.info(`Добавлен новый товар в местоположение: ${productId}, ${locationId}, количество: ${quantity}`);
+        logger.info(`Добавлен новый товар в местоположение: ${productId}, ${locationId}, количество: ${numericQuantity}`);
       }
 
       return true;
     } catch (error) {
       logger.error('Ошибка при добавлении товара в местоположение:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Регистрация некондиционного товара
-   */
-  async registerDefect(params) {
-    try {
-      const { productId, defectReason, executor } = params;
-
-      const query = `
-        INSERT INTO x_Storage_Defects (
-          Product_Id, Defect_Reason, Executor, Create_Date
-        )
-        VALUES (
-          @productId, @defectReason, @executor, GETDATE()
-        )
-      `;
-
-      const request = this.pool.request();
-      request.input('productId', sql.VarChar, productId);
-      request.input('defectReason', sql.VarChar, defectReason);
-      request.input('executor', sql.VarChar, executor);
-
-      await request.query(query);
-      logger.info(`Зарегистрирована некондиция для товара: ${productId}, причина: ${defectReason}`);
-      return true;
-    } catch (error) {
-      logger.error('Ошибка при регистрации некондиции:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Логирование операций со складом
-   */
-  async logStorageOperation(params) {
-    try {
-      const {
-        operationType, productId, prunitId, fromLocationId,
-        toLocationId, quantity, expirationDate, conditionState, executor
-      } = params;
-
-      const query = `
-        INSERT INTO x_Storage_Operations_Log (
-          Operation_Type, Product_Id, Prunit_Id, From_Location_Id,
-          To_Location_Id, Quantity, Expiration_Date, Condition_State,
-          Executor, Operation_Date
-        )
-        VALUES (
-          @operationType, @productId, @prunitId, @fromLocationId,
-          @toLocationId, @quantity, @expirationDate, @conditionState,
-          @executor, GETDATE()
-        )
-      `;
-
-      const request = this.pool.request();
-      request.input('operationType', sql.VarChar, operationType);
-      request.input('productId', sql.VarChar, productId);
-      request.input('prunitId', sql.VarChar, prunitId);
-      request.input('fromLocationId', sql.VarChar, fromLocationId);
-      request.input('toLocationId', sql.VarChar, toLocationId || null);
-      request.input('quantity', sql.Float, quantity);
-      request.input('expirationDate', sql.Date, expirationDate);
-      request.input('conditionState', sql.VarChar, conditionState);
-      request.input('executor', sql.VarChar, executor);
-
-      await request.query(query);
-      logger.info(`Операция ${operationType} успешно залогирована для товара: ${productId}`);
-      return true;
-    } catch (error) {
-      logger.error('Ошибка при логировании операции:', error);
       throw error;
     }
   }

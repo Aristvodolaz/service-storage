@@ -158,7 +158,10 @@ class StorageController {
         executor,
         wrShk,
         conditionState,
-        expirationDate
+        expirationDate,
+        name,
+        article,
+        shk
       } = req.body;
 
       logger.info('Получен запрос на размещение товара в буфер');
@@ -169,7 +172,10 @@ class StorageController {
         executor,
         wrShk,
         conditionState,
-        expirationDate
+        expirationDate,
+        name,
+        article,
+        shk
       });
 
       // Проверяем наличие обязательных параметров
@@ -235,14 +241,18 @@ class StorageController {
         req.body.expirationDate = parsedDate.toISOString().split('T')[0];
       }
 
+      // Вызываем сервис для размещения товара в буфер
       const result = await storageService.moveToBuffer({
         productId,
         prunitId,
-        quantity,
+        quantity: parseFloat(quantity),
         executor,
         wrShk,
-        conditionState: req.body.conditionState,
-        expirationDate: req.body.expirationDate
+        conditionState: normalizedCondition,
+        expirationDate: parsedDate,
+        name,
+        article,
+        shk
       });
 
       if (!result.success) {
