@@ -89,40 +89,138 @@ class StorageService {
   /**
    * Получение информации о товаре из x_Storage_Full_Info
    */
-  async getStorageInfo(params) {
+  async getStorageInfo({ productId, shk, article, wrShk }) {
     try {
-      // Проверка корректности входных данных
-      if (params.productId && typeof params.productId !== 'string') {
-        throw new Error('Некорректный формат ID товара');
-      }
-      if (params.shk && typeof params.shk !== 'string') {
-        throw new Error('Некорректный формат штрих-кода');
-      }
+      logger.info('Получение информации о товаре:', { productId, shk, article, wrShk });
 
-      const items = await this.repository.getStorageInfo(params);
-
-      if (items.length === 0) {
+      if (!productId && !shk && !article && !wrShk) {
         return {
           success: false,
-          errorCode: 404,
-          msg: 'Информация о товаре не найдена'
+          errorCode: 400,
+          msg: 'Необходимо указать ID товара, ШК, артикул или ШК ячейки'
         };
       }
 
-      // Группируем по адресам буфера
-      const bufferItems = items.filter(item => item.idScklad && item.idScklad.startsWith('BUFFER'));
-      const pickingItems = items.filter(item => item.idScklad && !item.idScklad.startsWith('BUFFER'));
+      const pool = await connectToDatabase();
+      let query = `
+        SELECT
+          p.id as product_id,
+          p.name as product_name,
+          p.article,
+          p.shk,
+          pu.id as prunit_id,
+          pu.name as prunit_name,
+          sl.id as location_id,
+          sl.wr_shk,
+          sl.name as location_name,
+          sl.zone,
+          sl.rack,
+          sl.shelf,
+          sl.position,
+          sl.quantity,
+          sl.condition_state,
+          sl.expiration_date,
+          sl.created_at,
+          sl.updated_at,
+          sl.created_by,
+          sl.updated_by
+        FROM wms.products p
+        LEFT JOIN wms.product_units pu ON p.id = pu.product_id
+        LEFT JOIN wms.storage_locations sl ON pu.id = sl.prunit_id
+        WHERE 1=1
+      `;
+
+      const params = [];
+      if (productId) {
+        query += ` AND p.id = @productId`;
+        params.push({ name: 'productId', value: productId });
+      }
+      if (shk) {
+        query += ` AND p.shk = @shk`;
+        params.push({ name: 'shk', value: shk });
+      }
+      if (article) {
+        query += ` AND p.article = @article`;
+        params.push({ name: 'article', value: article });
+      }
+      if (wrShk) {
+        query += ` AND sl.wr_shk = @wrShk`;
+        params.push({ name: 'wrShk', value: wrShk });
+      }
+
+      const request = pool.request();
+      params.forEach(param => {
+        request.input(param.name, param.value);
+      });
+
+      const result = await request.query(query);
+
+      if (!result.recordset || result.recordset.length === 0) {
+        let errorMsg = 'Товар не найден';
+        if (productId) errorMsg = `Товар с ID ${productId} не найден`;
+        if (shk) errorMsg = `Товар с ШК ${shk} не найден`;
+        if (article) errorMsg = `Товар с артикулом ${article} не найден`;
+        if (wrShk) errorMsg = `Ячейка с ШК ${wrShk} не найдена или пуста`;
+
+        return {
+          success: false,
+          errorCode: 404,
+          msg: errorMsg
+        };
+      }
+
+      // Группируем результаты по товарам
+      const products = {};
+      result.recordset.forEach(record => {
+        if (!products[record.product_id]) {
+          products[record.product_id] = {
+            id: record.product_id,
+            name: record.product_name,
+            article: record.article,
+            shk: record.shk,
+            units: {}
+          };
+        }
+
+        if (record.prunit_id && !products[record.product_id].units[record.prunit_id]) {
+          products[record.product_id].units[record.prunit_id] = {
+            id: record.prunit_id,
+            name: record.prunit_name,
+            locations: []
+          };
+        }
+
+        if (record.location_id) {
+          products[record.product_id].units[record.prunit_id].locations.push({
+            id: record.location_id,
+            wrShk: record.wr_shk,
+            name: record.location_name,
+            zone: record.zone,
+            rack: record.rack,
+            shelf: record.shelf,
+            position: record.position,
+            quantity: record.quantity,
+            conditionState: record.condition_state,
+            expirationDate: record.expiration_date,
+            createdAt: record.created_at,
+            updatedAt: record.updated_at,
+            createdBy: record.created_by,
+            updatedBy: record.updated_by
+          });
+        }
+      });
 
       return {
         success: true,
-        data: {
-          bufferStock: bufferItems.map(item => item.toJSON()),
-          pickingLocations: pickingItems.map(item => item.toJSON())
-        }
+        data: Object.values(products)
       };
     } catch (error) {
       logger.error('Ошибка при получении информации о товаре:', error);
-      throw error;
+      return {
+        success: false,
+        errorCode: 500,
+        msg: 'Внутренняя ошибка сервера'
+      };
     }
   }
 
@@ -198,7 +296,15 @@ class StorageService {
         await this.initialize();
       }
 
-      const { productId, prunitId, quantity, executor, wrShk, conditionState, expirationDate } = params;
+      const {
+        productId,
+        prunitId,
+        quantity,
+        executor,
+        wrShk,
+        conditionState,
+        expirationDate
+      } = params;
 
       // Проверка корректности входных данных
       if (typeof productId !== 'string') {
@@ -246,29 +352,46 @@ class StorageService {
         };
       }
 
-      // Определяем ID склада в зависимости от состояния товара
-      const idScklad = conditionState === 'некондиция' ? 'BUFFER_DEFECT' : 'BUFFER';
+      // Получаем информацию о местоположении по штрих-коду
+      const location = await this.repository.getLocationByWrShk(wrShk);
+      if (!location) {
+        return {
+          success: false,
+          errorCode: 404,
+          msg: `Местоположение с штрих-кодом ${wrShk} не найдено`
+        };
+      }
+
+      // Проверяем, является ли местоположение буферным
+      if (!location.isBuffer) {
+        return {
+          success: false,
+          errorCode: 400,
+          msg: 'Указанное местоположение не является буферной зоной'
+        };
+      }
+
+      // Определяем ID буферной зоны в зависимости от состояния товара
+      const locationId = location.locationId;
 
       // Проверяем, есть ли уже товар в указанной ячейке
-      const existingItems = await this.repository.getExistingItemInLocation(productId, prunitId, wrShk, idScklad);
+      const existingItem = await this.repository.checkBufferItem(productId, prunitId, locationId);
 
       let result;
 
-      if (existingItems && existingItems.length > 0) {
+      if (existingItem) {
         // Товар уже есть в ячейке, обновляем количество
-        const existingItem = existingItems[0];
-        const newQuantity = existingItem.Product_QNT + quantity;
+        const newQuantity = existingItem.quantity + quantity;
 
         // Обновляем запись
-        result = await this.repository.update(productId, {
+        result = await this.repository.updateBufferQuantity({
+          productId,
           prunitId,
-          productQnt: newQuantity,
-          placeQnt: newQuantity,
-          conditionState: conditionState || existingItem.Condition_State || 'кондиция',
-          executor,
-          idScklad,
-          wrShk,
-          expirationDate: expirationDate || existingItem.Expiration_Date
+          locationId,
+          quantity: newQuantity,
+          conditionState: conditionState || existingItem.conditionState || 'кондиция',
+          expirationDate: expirationDate || existingItem.expirationDate,
+          executor
         });
 
         if (!result) {
@@ -283,32 +406,25 @@ class StorageService {
           success: true,
           msg: 'Количество товара в буфере успешно обновлено',
           data: {
-            previousQuantity: existingItem.Product_QNT,
+            previousQuantity: existingItem.quantity,
             newQuantity: newQuantity,
-            location: idScklad
+            locationId,
+            wrShk,
+            conditionState: conditionState || existingItem.conditionState || 'кондиция',
+            expirationDate: expirationDate || existingItem.expirationDate
           }
         };
       } else {
         // Товара нет в ячейке, создаем новую запись
-        const bufferData = {
-          id: productId,
-          name: item.name,
-          article: item.article,
-          shk: item.shk,
-          productQnt: quantity,
-          prunitId: prunitId,
-          prunitName: item.prunitName,
-          wrShk: wrShk,
-          idScklad: idScklad,
-          executor: executor,
-          placeQnt: quantity,
+        result = await this.repository.addToBuffer({
+          productId,
+          prunitId,
+          locationId,
+          quantity,
           conditionState: conditionState || 'кондиция',
-          expirationDate: expirationDate || item.expirationDate,
-          startExpirationDate: item.startExpirationDate,
-          endExpirationDate: item.endExpirationDate
-        };
-
-        result = await this.repository.create(bufferData);
+          expirationDate: expirationDate || null,
+          executor
+        });
 
         if (!result) {
           return {
@@ -322,14 +438,21 @@ class StorageService {
           success: true,
           msg: 'Товар успешно размещен в буфер',
           data: {
-            quantity: quantity,
-            location: idScklad
+            quantity,
+            locationId,
+            wrShk,
+            conditionState: conditionState || 'кондиция',
+            expirationDate
           }
         };
       }
     } catch (error) {
       logger.error('Ошибка при размещении товара в буфер:', error);
-      throw error;
+      return {
+        success: false,
+        errorCode: 500,
+        msg: 'Внутренняя ошибка сервера: ' + error.message
+      };
     }
   }
 
@@ -342,7 +465,7 @@ class StorageService {
         await this.initialize();
       }
 
-      const { productId, prunitId, quantity, condition, executor } = params;
+      const { productId, prunitId, quantity, condition, executor, locationId } = params;
 
       // Проверка корректности входных данных
       if (typeof productId !== 'string') {
@@ -360,6 +483,9 @@ class StorageService {
       if (typeof executor !== 'string') {
         throw new Error('Некорректный формат ID исполнителя');
       }
+      if (!locationId) {
+        throw new Error('Не указан ID местоположения');
+      }
 
       // Получаем информацию о товаре в буфере
       const bufferStock = await this.repository.getBufferStock(productId);
@@ -372,7 +498,12 @@ class StorageService {
         };
       }
 
-      const bufferItem = bufferStock.find(item => item.Prunit_Id === prunitId);
+      // Ищем товар в указанном местоположении
+      const bufferItem = bufferStock.find(item =>
+        item.prunitId === prunitId &&
+        item.locationId === locationId
+      );
+
       if (!bufferItem) {
         return {
           success: false,
@@ -382,36 +513,67 @@ class StorageService {
       }
 
       // Проверяем доступное количество
-      if (bufferItem.Product_QNT < quantity) {
+      if (bufferItem.quantity < quantity) {
         return {
           success: false,
           errorCode: 400,
-          msg: 'Недостаточное количество товара в буфере'
+          msg: `Недостаточное количество товара в буфере. Доступно: ${bufferItem.quantity}, запрошено: ${quantity}`
         };
       }
 
+      // Определяем, полное ли это изъятие
+      const isFullRemoval = bufferItem.quantity <= quantity;
+      const newQuantity = bufferItem.quantity - quantity;
+
       if (condition === 'некондиция') {
-        // Обновляем состояние товара на некондицию
-        const updated = await this.repository.update(productId, {
-          prunitId,
-          productQnt: quantity,
-          placeQnt: quantity,
-          conditionState: 'некондиция',
-          executor,
-          idScklad: 'BUFFER_DEFECT'
+        // Регистрируем некондицию
+        await this.repository.registerDefect({
+          productId,
+          defectReason: 'Перемещение из буфера с отметкой некондиции',
+          executor
         });
 
-        if (!updated) {
-          return {
-            success: false,
-            errorCode: 400,
-            msg: 'Не удалось обновить состояние товара'
-          };
+        // Если это полное изъятие, удаляем запись из буфера
+        if (isFullRemoval) {
+          // Удаляем запись из буфера
+          await this.repository.deleteFromBuffer(productId, prunitId, locationId);
+        } else {
+          // Обновляем количество в буфере
+          await this.repository.updateBufferQuantity({
+            productId,
+            prunitId,
+            locationId,
+            quantity: newQuantity,
+            conditionState: bufferItem.conditionState,
+            expirationDate: bufferItem.expirationDate,
+            executor
+          });
         }
+
+        // Логируем операцию
+        await this.repository.logStorageOperation({
+          operationType: 'изъятие_некондиция',
+          productId,
+          prunitId,
+          fromLocationId: locationId,
+          toLocationId: null,
+          quantity,
+          expirationDate: bufferItem.expirationDate,
+          conditionState: 'некондиция',
+          executor
+        });
 
         return {
           success: true,
-          msg: 'Товар помечен как некондиция'
+          msg: 'Товар помечен как некондиция и изъят из буфера',
+          data: {
+            productId,
+            prunitId,
+            locationId,
+            removedQuantity: quantity,
+            remainingQuantity: newQuantity,
+            isFullRemoval
+          }
         };
       } else {
         // Получаем адреса комплектации
@@ -425,33 +587,71 @@ class StorageService {
           };
         }
 
-        // Перемещаем товар в зону комплектации
-        const updated = await this.repository.update(productId, {
+        // Выбираем первый адрес комплектации
+        const targetLocationId = locations[0].locationId;
+
+        // Если это полное изъятие, удаляем запись из буфера
+        if (isFullRemoval) {
+          // Удаляем запись из буфера
+          await this.repository.deleteFromBuffer(productId, prunitId, locationId);
+        } else {
+          // Обновляем количество в буфере
+          await this.repository.updateBufferQuantity({
+            productId,
+            prunitId,
+            locationId,
+            quantity: newQuantity,
+            conditionState: bufferItem.conditionState,
+            expirationDate: bufferItem.expirationDate,
+            executor
+          });
+        }
+
+        // Добавляем товар в зону комплектации
+        await this.repository.addToLocation({
+          productId,
           prunitId,
-          productQnt: quantity,
-          placeQnt: quantity,
+          locationId: targetLocationId,
+          quantity,
           conditionState: 'кондиция',
-          executor,
-          idScklad: locations[0].id_scklad
+          expirationDate: bufferItem.expirationDate,
+          executor
         });
 
-        if (!updated) {
-          return {
-            success: false,
-            errorCode: 400,
-            msg: 'Не удалось переместить товар в зону комплектации'
-          };
-        }
+        // Логируем операцию
+        await this.repository.logStorageOperation({
+          operationType: 'перемещение',
+          productId,
+          prunitId,
+          fromLocationId: locationId,
+          toLocationId: targetLocationId,
+          quantity,
+          expirationDate: bufferItem.expirationDate,
+          conditionState: 'кондиция',
+          executor
+        });
 
         return {
           success: true,
-          msg: 'Товар перемещен в зону комплектации',
-          data: { locations }
+          msg: 'Товар перемещен из буфера в зону комплектации',
+          data: {
+            productId,
+            prunitId,
+            fromLocationId: locationId,
+            toLocationId: targetLocationId,
+            quantity,
+            remainingQuantity: newQuantity,
+            isFullRemoval
+          }
         };
       }
     } catch (error) {
       logger.error('Ошибка при перемещении товара из буфера:', error);
-      throw error;
+      return {
+        success: false,
+        errorCode: 500,
+        msg: 'Внутренняя ошибка сервера: ' + error.message
+      };
     }
   }
 

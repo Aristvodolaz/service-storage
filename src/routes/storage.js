@@ -46,9 +46,48 @@ router.get('/search', [
 
 /**
  * @swagger
+ * /api/storage/info:
+ *   get:
+ *     summary: Получение информации о товаре по артикулу, ШК или ШК ячейки
+ *     tags: [Склад]
+ *     parameters:
+ *       - in: query
+ *         name: article
+ *         schema:
+ *           type: string
+ *         description: Артикул товара
+ *       - in: query
+ *         name: shk
+ *         schema:
+ *           type: string
+ *         description: Штрих-код товара
+ *       - in: query
+ *         name: wrShk
+ *         schema:
+ *           type: string
+ *         description: Штрих-код ячейки
+ *     responses:
+ *       200:
+ *         description: Информация о товаре
+ *       400:
+ *         description: Ошибка валидации параметров
+ *       404:
+ *         description: Товар не найден
+ *       500:
+ *         description: Внутренняя ошибка сервера
+ */
+router.get('/info', [
+  query('article').optional().isString().trim(),
+  query('shk').optional().isString().trim(),
+  query('wrShk').optional().isString().trim(),
+  validate
+], storageController.getStorageInfo);
+
+/**
+ * @swagger
  * /api/storage/{productId}/info:
  *   get:
- *     summary: Получение информации о товаре
+ *     summary: Получение информации о товаре по ID
  *     tags: [Склад]
  *     parameters:
  *       - in: path
@@ -57,11 +96,6 @@ router.get('/search', [
  *         schema:
  *           type: string
  *         description: ID товара
- *       - in: query
- *         name: shk
- *         schema:
- *           type: string
- *         description: Штрих-код товара
  *     responses:
  *       200:
  *         description: Информация о товаре
@@ -73,8 +107,7 @@ router.get('/search', [
  *         description: Внутренняя ошибка сервера
  */
 router.get('/:productId/info', [
-  param('productId').optional().isString().trim(),
-  query('shk').optional().isString().trim(),
+  param('productId').isString().trim().notEmpty(),
   validate
 ], storageController.getStorageInfo);
 
@@ -189,6 +222,14 @@ router.put('/:productId/quantity', [
  *               wrShk:
  *                 type: string
  *                 description: Штрих-код места хранения
+ *               conditionState:
+ *                 type: string
+ *                 enum: [кондиция, некондиция]
+ *                 description: Состояние товара
+ *               expirationDate:
+ *                 type: string
+ *                 format: date
+ *                 description: Срок годности
  *     responses:
  *       200:
  *         description: Товар успешно размещен в буфер
@@ -205,8 +246,72 @@ router.post('/:productId/buffer', [
   body('quantity').isFloat({ min: 0.01 }),
   body('executor').isString().trim().notEmpty(),
   body('wrShk').isString().trim().notEmpty(),
+  body('conditionState').optional().isIn(['кондиция', 'некондиция']),
+  body('expirationDate').optional().isISO8601(),
   validate
 ], storageController.moveToBuffer);
+
+/**
+ * @swagger
+ * /api/storage/{productId}/buffer/out:
+ *   post:
+ *     summary: Перемещение товара из буфера
+ *     tags: [Склад]
+ *     parameters:
+ *       - in: path
+ *         name: productId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: ID товара
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - prunitId
+ *               - quantity
+ *               - condition
+ *               - executor
+ *               - locationId
+ *             properties:
+ *               prunitId:
+ *                 type: string
+ *                 description: ID единицы хранения
+ *               quantity:
+ *                 type: number
+ *                 description: Количество
+ *               condition:
+ *                 type: string
+ *                 enum: [кондиция, некондиция]
+ *                 description: Состояние товара
+ *               executor:
+ *                 type: string
+ *                 description: ID исполнителя
+ *               locationId:
+ *                 type: string
+ *                 description: ID местоположения в буфере
+ *     responses:
+ *       200:
+ *         description: Товар успешно перемещен из буфера
+ *       400:
+ *         description: Ошибка валидации параметров
+ *       404:
+ *         description: Товар не найден в буфере
+ *       500:
+ *         description: Внутренняя ошибка сервера
+ */
+router.post('/:productId/buffer/out', [
+  param('productId').isString().trim().notEmpty(),
+  body('prunitId').isString().trim().notEmpty(),
+  body('quantity').isFloat({ min: 0.01 }),
+  body('condition').isIn(['кондиция', 'некондиция']),
+  body('executor').isString().trim().notEmpty(),
+  body('locationId').isString().trim().notEmpty(),
+  validate
+], storageController.moveFromBuffer);
 
 /**
  * @swagger

@@ -48,22 +48,28 @@ class StorageController {
   async getStorageInfo(req, res) {
     try {
       const { productId } = req.params;
-      const { shk } = req.query;
+      const { shk, article, wrShk } = req.query;
 
-      if (!productId && !shk) {
+      logger.info('Получен запрос на получение информации о товаре');
+      logger.info('Параметры запроса:', { productId, shk, article, wrShk });
+
+      if (!productId && !shk && !article && !wrShk) {
+        logger.warn('Не указаны параметры поиска (ID товара, ШК, артикул или ШК ячейки)');
         return res.status(400).json({
           success: false,
           errorCode: 400,
-          msg: 'Необходимо указать ID товара или штрих-код'
+          msg: 'Необходимо указать ID товара, ШК, артикул или ШК ячейки'
         });
       }
 
-      const result = await storageService.getStorageInfo({ productId, shk });
+      const result = await storageService.getStorageInfo({ productId, shk, article, wrShk });
 
       if (!result.success) {
+        logger.warn('Получение информации о товаре завершилось неудачей:', result.msg);
         return res.status(result.errorCode).json(result);
       }
 
+      logger.info('Информация о товаре успешно получена');
       return res.status(200).json(result);
     } catch (error) {
       logger.error('Ошибка при получении информации о товаре:', error);
@@ -146,9 +152,28 @@ class StorageController {
   async moveToBuffer(req, res) {
     try {
       const { productId } = req.params;
-      const { prunitId, quantity, executor, wrShk, conditionState, expirationDate } = req.body;
+      const {
+        prunitId,
+        quantity,
+        executor,
+        wrShk,
+        conditionState,
+        expirationDate
+      } = req.body;
+
+      logger.info('Получен запрос на размещение товара в буфер');
+      logger.info('Параметры запроса:', {
+        productId,
+        prunitId,
+        quantity,
+        executor,
+        wrShk,
+        conditionState,
+        expirationDate
+      });
 
       if (!productId || !prunitId || !quantity || !executor || !wrShk) {
+        logger.warn('Не указаны обязательные параметры');
         return res.status(400).json({
           success: false,
           errorCode: 400,
@@ -158,10 +183,21 @@ class StorageController {
 
       // Проверка корректности состояния товара
       if (conditionState && !['кондиция', 'некондиция'].includes(conditionState)) {
+        logger.warn('Некорректное значение состояния товара:', conditionState);
         return res.status(400).json({
           success: false,
           errorCode: 400,
           msg: 'Некорректное значение состояния товара'
+        });
+      }
+
+      // Проверка корректности дат
+      if (expirationDate && isNaN(Date.parse(expirationDate))) {
+        logger.warn('Некорректный формат срока годности:', expirationDate);
+        return res.status(400).json({
+          success: false,
+          errorCode: 400,
+          msg: 'Некорректный формат срока годности'
         });
       }
 
@@ -176,9 +212,11 @@ class StorageController {
       });
 
       if (!result.success) {
+        logger.warn('Размещение товара в буфер завершилось неудачей:', result.msg);
         return res.status(result.errorCode).json(result);
       }
 
+      logger.info('Товар успешно размещен в буфер');
       return res.status(200).json(result);
     } catch (error) {
       logger.error('Ошибка при размещении товара в буфер:', error);
@@ -196,9 +234,13 @@ class StorageController {
   async moveFromBuffer(req, res) {
     try {
       const { productId } = req.params;
-      const { prunitId, quantity, condition, executor } = req.body;
+      const { prunitId, quantity, condition, executor, locationId } = req.body;
 
-      if (!productId || !prunitId || !quantity || !condition || !executor) {
+      logger.info('Получен запрос на перемещение товара из буфера');
+      logger.info('Параметры запроса:', { productId, prunitId, quantity, condition, executor, locationId });
+
+      if (!productId || !prunitId || !quantity || !condition || !executor || !locationId) {
+        logger.warn('Не указаны все обязательные параметры');
         return res.status(400).json({
           success: false,
           errorCode: 400,
@@ -207,6 +249,7 @@ class StorageController {
       }
 
       if (!['кондиция', 'некондиция'].includes(condition)) {
+        logger.warn('Некорректное значение состояния товара:', condition);
         return res.status(400).json({
           success: false,
           errorCode: 400,
@@ -214,18 +257,32 @@ class StorageController {
         });
       }
 
+      // Проверяем, что количество является числом
+      const parsedQuantity = parseFloat(quantity);
+      if (isNaN(parsedQuantity) || parsedQuantity <= 0) {
+        logger.warn('Некорректное значение количества:', quantity);
+        return res.status(400).json({
+          success: false,
+          errorCode: 400,
+          msg: 'Количество должно быть положительным числом'
+        });
+      }
+
       const result = await storageService.moveFromBuffer({
         productId,
         prunitId,
-        quantity,
+        quantity: parsedQuantity,
         condition,
-        executor
+        executor,
+        locationId
       });
 
       if (!result.success) {
+        logger.warn('Перемещение товара из буфера завершилось неудачей:', result.msg);
         return res.status(result.errorCode).json(result);
       }
 
+      logger.info('Товар успешно перемещен из буфера');
       return res.status(200).json(result);
     } catch (error) {
       logger.error('Ошибка при перемещении товара из буфера:', error);

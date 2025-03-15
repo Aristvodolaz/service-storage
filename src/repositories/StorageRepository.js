@@ -1,6 +1,7 @@
 const { connectToDatabase } = require('../config/database');
 const StorageItem = require('../models/StorageItem');
 const logger = require('../utils/logger');
+const sql = require('mssql');
 
 class StorageRepository {
   constructor(pool) {
@@ -296,21 +297,24 @@ class StorageRepository {
   async getPickingLocations(productId) {
     try {
       const query = `
-        SELECT * FROM OPENQUERY(OW,
-          'SELECT
-            id_scklad,
-            name_scklad
-          FROM wms.x_Storage_Full_Info
-          WHERE id = ''${productId}''
-          AND id_scklad NOT LIKE ''BUFFER%''
-          GROUP BY id_scklad, name_scklad'
-        )
+        SELECT
+          l.Id_Scklad as locationId,
+          l.Name_Scklad as locationName,
+          l.Type_Scklad as locationType
+        FROM x_Storage_Locations l
+        JOIN x_Storage_Product_Locations pl ON l.Id_Scklad = pl.Location_Id
+        WHERE pl.Product_Id = @productId
+        AND l.Type_Scklad = 'picking'
       `;
 
-      const result = await this.pool.request().query(query);
+      const request = this.pool.request();
+      request.input('productId', sql.VarChar, productId);
+
+      const result = await request.query(query);
+      logger.info(`Получены адреса комплектации для товара ${productId}: ${result.recordset.length} записей`);
       return result.recordset;
     } catch (error) {
-      logger.error('Error in getPickingLocations:', error);
+      logger.error('Ошибка при получении адресов комплектации:', error);
       throw error;
     }
   }
@@ -320,20 +324,19 @@ class StorageRepository {
    */
   async getBufferStock(productId) {
     try {
+      logger.info('Получение остатков в буфере для товара:', productId);
+
       const query = `
         SELECT
-          ID,
-          Prunit_Id,
-          Product_QNT,
-          Place_QNT,
-          Condition_State,
-          Expiration_Date,
-          id_scklad,
-          WR_SHK
-        FROM [SPOe_rc].[dbo].[x_Storage_Full_Info]
-        WHERE ID = @productId
-        AND id_scklad LIKE 'BUFFER%'
-        ORDER BY Expiration_Date DESC
+          productId,
+          prunitId,
+          locationId,
+          quantity,
+          conditionState,
+          expirationDate
+        FROM [SPOe_rc].[dbo].[x_Storage_Buffer]
+        WHERE productId = @productId
+        ORDER BY expirationDate DESC
       `;
 
       const result = await this.pool.request()
@@ -1161,11 +1164,11 @@ class StorageRepository {
   /**
    * Регистрация некондиции
    */
-  async registerDefect(data) {
+  async registerDefect(params) {
     try {
-      const { productId, defectReason, executor } = data;
+      const { productId, defectReason, executor } = params;
 
-      logger.info('Регистрация некондиции:', JSON.stringify(data));
+      logger.info('Регистрация некондиции:', JSON.stringify(params));
 
       // Проверяем существование товара
       const checkQuery = `
@@ -1290,6 +1293,371 @@ class StorageRepository {
       return result.recordset;
     } catch (error) {
       logger.error('Error in getInventoryReport:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Добавление товара в буфер (x_Storage_Buffer)
+   */
+  async addToBuffer(data) {
+    try {
+      logger.info('Добавление товара в буфер:', JSON.stringify(data));
+
+      const query = `
+        INSERT INTO [SPOe_rc].[dbo].[x_Storage_Buffer]
+        (productId, prunitId, locationId, quantity, expirationDate, conditionState, createdAt)
+        VALUES
+        (@productId, @prunitId, @locationId, @quantity, @expirationDate, @conditionState, GETDATE())
+      `;
+
+      const result = await this.pool.request()
+        .input('productId', data.productId)
+        .input('prunitId', data.prunitId)
+        .input('locationId', data.locationId)
+        .input('quantity', data.quantity)
+        .input('expirationDate', data.expirationDate || null)
+        .input('conditionState', data.conditionState || 'кондиция')
+        .query(query);
+
+      // Логируем операцию в x_Storage_Operations
+      await this.logStorageOperation({
+        operationType: 'приемка',
+        productId: data.productId,
+        prunitId: data.prunitId,
+        fromLocationId: null,
+        toLocationId: data.locationId,
+        quantity: data.quantity,
+        expirationDate: data.expirationDate,
+        conditionState: data.conditionState || 'кондиция',
+        executor: data.executor
+      });
+
+      return result.rowsAffected[0] > 0;
+    } catch (error) {
+      logger.error('Ошибка при добавлении товара в буфер:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Обновление количества товара в буфере (x_Storage_Buffer)
+   */
+  async updateBufferQuantity(data) {
+    try {
+      logger.info('Обновление количества товара в буфере:', JSON.stringify(data));
+
+      const query = `
+        UPDATE [SPOe_rc].[dbo].[x_Storage_Buffer]
+        SET quantity = @quantity,
+            expirationDate = @expirationDate,
+            conditionState = @conditionState
+        WHERE productId = @productId
+          AND prunitId = @prunitId
+          AND locationId = @locationId
+      `;
+
+      const result = await this.pool.request()
+        .input('productId', data.productId)
+        .input('prunitId', data.prunitId)
+        .input('locationId', data.locationId)
+        .input('quantity', data.quantity)
+        .input('expirationDate', data.expirationDate || null)
+        .input('conditionState', data.conditionState || 'кондиция')
+        .query(query);
+
+      // Логируем операцию в x_Storage_Operations
+      await this.logStorageOperation({
+        operationType: 'обновление',
+        productId: data.productId,
+        prunitId: data.prunitId,
+        fromLocationId: data.locationId,
+        toLocationId: data.locationId,
+        quantity: data.quantity,
+        expirationDate: data.expirationDate,
+        conditionState: data.conditionState || 'кондиция',
+        executor: data.executor
+      });
+
+      return result.rowsAffected[0] > 0;
+    } catch (error) {
+      logger.error('Ошибка при обновлении количества товара в буфере:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Проверка наличия товара в буфере
+   */
+  async checkBufferItem(productId, prunitId, locationId) {
+    try {
+      logger.info('Проверка наличия товара в буфере:', { productId, prunitId, locationId });
+
+      const query = `
+        SELECT productId, prunitId, locationId, quantity, expirationDate, conditionState
+        FROM [SPOe_rc].[dbo].[x_Storage_Buffer]
+        WHERE productId = @productId
+          AND prunitId = @prunitId
+          AND locationId = @locationId
+      `;
+
+      const result = await this.pool.request()
+        .input('productId', productId)
+        .input('prunitId', prunitId)
+        .input('locationId', locationId)
+        .query(query);
+
+      return result.recordset.length > 0 ? result.recordset[0] : null;
+    } catch (error) {
+      logger.error('Ошибка при проверке наличия товара в буфере:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Получение информации о местоположении по штрих-коду
+   */
+  async getLocationByWrShk(wrShk) {
+    try {
+      logger.info('Получение информации о местоположении по штрих-коду:', wrShk);
+
+      const query = `
+        SELECT locationId, locationCode, section, warehouseId, isBuffer
+        FROM [SPOe_rc].[dbo].[x_Storage_Locations]
+        WHERE locationCode = @wrShk
+      `;
+
+      const result = await this.pool.request()
+        .input('wrShk', wrShk)
+        .query(query);
+
+      return result.recordset.length > 0 ? result.recordset[0] : null;
+    } catch (error) {
+      logger.error('Ошибка при получении информации о местоположении:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Логирование операции в x_Storage_Operations
+   */
+  async logStorageOperation(data) {
+    try {
+      logger.info('Логирование операции:', JSON.stringify(data));
+
+      const query = `
+        INSERT INTO [SPOe_rc].[dbo].[x_Storage_Operations]
+        (operationType, productId, prunitId, fromLocationId, toLocationId,
+         quantity, expirationDate, conditionState, executor, executedAt)
+        VALUES
+        (@operationType, @productId, @prunitId, @fromLocationId, @toLocationId,
+         @quantity, @expirationDate, @conditionState, @executor, GETDATE())
+      `;
+
+      const request = this.pool.request()
+        .input('operationType', data.operationType)
+        .input('productId', data.productId)
+        .input('prunitId', data.prunitId)
+        .input('fromLocationId', data.fromLocationId)
+        .input('toLocationId', data.toLocationId)
+        .input('quantity', data.quantity)
+        .input('conditionState', data.conditionState)
+        .input('executor', data.executor);
+
+      if (data.expirationDate) {
+        request.input('expirationDate', data.expirationDate);
+      } else {
+        request.input('expirationDate', null);
+      }
+
+      const result = await request.query(query);
+      return result.rowsAffected[0] > 0;
+    } catch (error) {
+      logger.error('Ошибка при логировании операции:', error);
+      // Не выбрасываем ошибку, чтобы не прерывать основную операцию
+      return false;
+    }
+  }
+
+  /**
+   * Удаление товара из буфера
+   */
+  async deleteFromBuffer(productId, prunitId, locationId) {
+    try {
+      const query = `
+        DELETE FROM x_Storage_Buffer
+        WHERE Product_Id = @productId
+        AND Prunit_Id = @prunitId
+        AND Location_Id = @locationId
+      `;
+
+      const request = this.pool.request();
+      request.input('productId', sql.VarChar, productId);
+      request.input('prunitId', sql.VarChar, prunitId);
+      request.input('locationId', sql.VarChar, locationId);
+
+      await request.query(query);
+      logger.info(`Товар успешно удален из буфера: ${productId}, ${prunitId}, ${locationId}`);
+      return true;
+    } catch (error) {
+      logger.error('Ошибка при удалении товара из буфера:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Добавление товара в указанное местоположение
+   */
+  async addToLocation(params) {
+    try {
+      const { productId, prunitId, locationId, quantity, conditionState, expirationDate, executor } = params;
+
+      // Проверяем, существует ли уже такой товар в указанном местоположении
+      const checkQuery = `
+        SELECT Product_QNT FROM x_Storage_Full_Info
+        WHERE Product_Id = @productId
+        AND Prunit_Id = @prunitId
+        AND Id_Scklad = @locationId
+      `;
+
+      const checkRequest = this.pool.request();
+      checkRequest.input('productId', sql.VarChar, productId);
+      checkRequest.input('prunitId', sql.VarChar, prunitId);
+      checkRequest.input('locationId', sql.VarChar, locationId);
+
+      const result = await checkRequest.query(checkQuery);
+
+      if (result.recordset.length > 0) {
+        // Товар уже существует, обновляем количество
+        const currentQuantity = result.recordset[0].Product_QNT;
+        const newQuantity = currentQuantity + quantity;
+
+        const updateQuery = `
+          UPDATE x_Storage_Full_Info
+          SET Product_QNT = @newQuantity,
+              Place_QNT = @newQuantity,
+              Condition_State = @conditionState,
+              Expiration_Date = @expirationDate,
+              Executor = @executor,
+              Update_Date = GETDATE()
+          WHERE Product_Id = @productId
+          AND Prunit_Id = @prunitId
+          AND Id_Scklad = @locationId
+        `;
+
+        const updateRequest = this.pool.request();
+        updateRequest.input('productId', sql.VarChar, productId);
+        updateRequest.input('prunitId', sql.VarChar, prunitId);
+        updateRequest.input('locationId', sql.VarChar, locationId);
+        updateRequest.input('newQuantity', sql.Float, newQuantity);
+        updateRequest.input('conditionState', sql.VarChar, conditionState);
+        updateRequest.input('expirationDate', sql.Date, expirationDate);
+        updateRequest.input('executor', sql.VarChar, executor);
+
+        await updateRequest.query(updateQuery);
+        logger.info(`Обновлено количество товара в местоположении: ${productId}, ${locationId}, новое количество: ${newQuantity}`);
+      } else {
+        // Товар не существует, добавляем новую запись
+        const insertQuery = `
+          INSERT INTO x_Storage_Full_Info (
+            Product_Id, Prunit_Id, Id_Scklad, Product_QNT, Place_QNT,
+            Condition_State, Expiration_Date, Executor, Create_Date, Update_Date
+          )
+          VALUES (
+            @productId, @prunitId, @locationId, @quantity, @quantity,
+            @conditionState, @expirationDate, @executor, GETDATE(), GETDATE()
+          )
+        `;
+
+        const insertRequest = this.pool.request();
+        insertRequest.input('productId', sql.VarChar, productId);
+        insertRequest.input('prunitId', sql.VarChar, prunitId);
+        insertRequest.input('locationId', sql.VarChar, locationId);
+        insertRequest.input('quantity', sql.Float, quantity);
+        insertRequest.input('conditionState', sql.VarChar, conditionState);
+        insertRequest.input('expirationDate', sql.Date, expirationDate);
+        insertRequest.input('executor', sql.VarChar, executor);
+
+        await insertRequest.query(insertQuery);
+        logger.info(`Добавлен новый товар в местоположение: ${productId}, ${locationId}, количество: ${quantity}`);
+      }
+
+      return true;
+    } catch (error) {
+      logger.error('Ошибка при добавлении товара в местоположение:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Регистрация некондиционного товара
+   */
+  async registerDefect(params) {
+    try {
+      const { productId, defectReason, executor } = params;
+
+      const query = `
+        INSERT INTO x_Storage_Defects (
+          Product_Id, Defect_Reason, Executor, Create_Date
+        )
+        VALUES (
+          @productId, @defectReason, @executor, GETDATE()
+        )
+      `;
+
+      const request = this.pool.request();
+      request.input('productId', sql.VarChar, productId);
+      request.input('defectReason', sql.VarChar, defectReason);
+      request.input('executor', sql.VarChar, executor);
+
+      await request.query(query);
+      logger.info(`Зарегистрирована некондиция для товара: ${productId}, причина: ${defectReason}`);
+      return true;
+    } catch (error) {
+      logger.error('Ошибка при регистрации некондиции:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Логирование операций со складом
+   */
+  async logStorageOperation(params) {
+    try {
+      const {
+        operationType, productId, prunitId, fromLocationId,
+        toLocationId, quantity, expirationDate, conditionState, executor
+      } = params;
+
+      const query = `
+        INSERT INTO x_Storage_Operations_Log (
+          Operation_Type, Product_Id, Prunit_Id, From_Location_Id,
+          To_Location_Id, Quantity, Expiration_Date, Condition_State,
+          Executor, Operation_Date
+        )
+        VALUES (
+          @operationType, @productId, @prunitId, @fromLocationId,
+          @toLocationId, @quantity, @expirationDate, @conditionState,
+          @executor, GETDATE()
+        )
+      `;
+
+      const request = this.pool.request();
+      request.input('operationType', sql.VarChar, operationType);
+      request.input('productId', sql.VarChar, productId);
+      request.input('prunitId', sql.VarChar, prunitId);
+      request.input('fromLocationId', sql.VarChar, fromLocationId);
+      request.input('toLocationId', sql.VarChar, toLocationId || null);
+      request.input('quantity', sql.Float, quantity);
+      request.input('expirationDate', sql.Date, expirationDate);
+      request.input('conditionState', sql.VarChar, conditionState);
+      request.input('executor', sql.VarChar, executor);
+
+      await request.query(query);
+      logger.info(`Операция ${operationType} успешно залогирована для товара: ${productId}`);
+      return true;
+    } catch (error) {
+      logger.error('Ошибка при логировании операции:', error);
       throw error;
     }
   }
