@@ -224,12 +224,11 @@ router.put('/:productId/quantity', [
  *                 description: Штрих-код места хранения
  *               conditionState:
  *                 type: string
- *                 enum: [кондиция, некондиция]
+ *                 enum: [кондиция, некондиция, good, bad]
  *                 description: Состояние товара
  *               expirationDate:
  *                 type: string
- *                 format: date
- *                 description: Срок годности
+ *                 description: Срок годности (формат YYYY-MM-DD или DD.MM.YYYY)
  *     responses:
  *       200:
  *         description: Товар успешно размещен в буфер
@@ -246,8 +245,14 @@ router.post('/:productId/buffer', [
   body('quantity').isFloat({ min: 0.01 }),
   body('executor').isString().trim().notEmpty(),
   body('wrShk').isString().trim().notEmpty(),
-  body('conditionState').optional().isIn(['кондиция', 'некондиция']),
-  body('expirationDate').optional().isISO8601(),
+  body('conditionState').optional().custom(value => {
+    // Принимаем любые значения, контроллер сам нормализует их
+    return true;
+  }),
+  body('expirationDate').optional().custom(value => {
+    // Принимаем любые строки, контроллер сам проверит формат
+    return true;
+  }),
   validate
 ], storageController.moveToBuffer);
 
@@ -786,7 +791,7 @@ router.post('/defects/register', [
  * /api/storage/reports/buffer:
  *   get:
  *     summary: Отчет по остаткам в буфере
- *     description: Возвращает отчет по остаткам товаров в буфере
+ *     description: Возвращает отчет по остаткам товаров в буфере из таблицы x_Storage_Full_Info
  *     tags: [Склад]
  *     responses:
  *       200:
@@ -813,9 +818,7 @@ router.post('/defects/register', [
  *                       shk:
  *                         type: string
  *                       prunitId:
- *                         type: string
- *                       prunitName:
- *                         type: string
+ *                         type: integer
  *                       quantity:
  *                         type: number
  *                       locationId:
@@ -825,6 +828,9 @@ router.post('/defects/register', [
  *                       conditionState:
  *                         type: string
  *                       expirationDate:
+ *                         type: string
+ *                         format: date
+ *                       createdAt:
  *                         type: string
  *                         format: date-time
  *                 count:

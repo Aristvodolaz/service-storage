@@ -306,6 +306,9 @@ class StorageService {
         expirationDate
       } = params;
 
+      logger.info('Начало выполнения moveToBuffer');
+      logger.info('Параметры:', JSON.stringify(params));
+
       // Проверка корректности входных данных
       if (typeof productId !== 'string') {
         throw new Error('Некорректный формат ID товара');
@@ -329,32 +332,13 @@ class StorageService {
         throw new Error('Некорректный формат срока годности');
       }
 
-      // Проверяем существование товара
-      const storageInfo = await this.repository.getStorageInfo({ productId });
-      if (storageInfo.length === 0) {
-        return {
-          success: false,
-          errorCode: 404,
-          msg: 'Товар не найден'
-        };
-      }
-
-      const item = storageInfo[0];
-
-      // Проверяем существование единицы хранения
-      const units = await this.repository.getStorageUnits(productId);
-      const unit = units.find(u => u.id === prunitId);
-      if (!unit) {
-        return {
-          success: false,
-          errorCode: 404,
-          msg: 'Единица хранения не найдена'
-        };
-      }
-
       // Получаем информацию о местоположении по штрих-коду
+      logger.info(`Проверка существования местоположения с штрих-кодом: ${wrShk}`);
       const location = await this.repository.getLocationByWrShk(wrShk);
+      logger.info(`Результат проверки местоположения: ${JSON.stringify(location)}`);
+
       if (!location) {
+        logger.warn(`Местоположение с штрих-кодом ${wrShk} не найдено`);
         return {
           success: false,
           errorCode: 404,
@@ -364,6 +348,7 @@ class StorageService {
 
       // Проверяем, является ли местоположение буферным
       if (!location.isBuffer) {
+        logger.warn(`Местоположение ${wrShk} не является буферной зоной`);
         return {
           success: false,
           errorCode: 400,
@@ -371,7 +356,6 @@ class StorageService {
         };
       }
 
-      // Определяем ID буферной зоны в зависимости от состояния товара
       const locationId = location.locationId;
 
       // Проверяем, есть ли уже товар в указанной ячейке
