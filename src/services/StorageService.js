@@ -314,31 +314,6 @@ class StorageService {
         throw new Error('Некорректный формат ID товара');
       }
 
-      // Преобразуем prunitId в числовой формат, если это строка с названием
-      let numericPrunitId = prunitId;
-      if (typeof prunitId === 'string') {
-        // Проверяем, является ли prunitId числом в строковом формате
-        if (!isNaN(parseInt(prunitId))) {
-          numericPrunitId = parseInt(prunitId);
-        } else {
-          // Если это название единицы хранения, преобразуем его в числовой ID
-          const prunitMap = {
-            'Единица': 1,
-            'Минимальная Упаковка': 2,
-            'Промежуточная Упаковка': 3,
-            'Фабричная Упаковка': 10,
-            'Паллет': 11
-          };
-
-          if (prunitMap[prunitId]) {
-            numericPrunitId = prunitMap[prunitId];
-            logger.info(`Преобразовано название единицы хранения "${prunitId}" в ID: ${numericPrunitId}`);
-          } else {
-            throw new Error(`Неизвестная единица хранения: ${prunitId}`);
-          }
-        }
-      }
-
       if (typeof quantity !== 'number' || quantity <= 0) {
         throw new Error('Некорректное количество');
       }
@@ -360,7 +335,7 @@ class StorageService {
 
       // Создаем объект местоположения
       const location = {
-        locationId: `BUFFER_${wrShk}`,
+        locationId: wrShk,
         isBuffer: true
       };
 
@@ -369,7 +344,7 @@ class StorageService {
       const locationId = location.locationId;
 
       // Проверяем, есть ли уже товар в указанной ячейке
-      const existingItem = await this.repository.checkBufferItem(productId, numericPrunitId, locationId);
+      const existingItem = await this.repository.checkBufferItem(productId, prunitId, locationId);
 
       let result;
 
@@ -380,7 +355,7 @@ class StorageService {
         // Обновляем запись
         result = await this.repository.updateBufferQuantity({
           productId,
-          prunitId: numericPrunitId,
+          prunitId,
           locationId,
           quantity: newQuantity,
           conditionState: conditionState || existingItem.conditionState || 'кондиция',
@@ -413,7 +388,7 @@ class StorageService {
         // Товара нет в ячейке, создаем новую запись
         result = await this.repository.addToBuffer({
           productId,
-          prunitId: numericPrunitId,
+          prunitId,
           locationId,
           quantity,
           conditionState: conditionState || 'кондиция',
@@ -468,31 +443,6 @@ class StorageService {
         throw new Error('Некорректный формат ID товара');
       }
 
-      // Преобразуем prunitId в числовой формат, если это строка с названием
-      let numericPrunitId = prunitId;
-      if (typeof prunitId === 'string') {
-        // Проверяем, является ли prunitId числом в строковом формате
-        if (!isNaN(parseInt(prunitId))) {
-          numericPrunitId = parseInt(prunitId);
-        } else {
-          // Если это название единицы хранения, преобразуем его в числовой ID
-          const prunitMap = {
-            'Единица': 1,
-            'Минимальная Упаковка': 2,
-            'Промежуточная Упаковка': 3,
-            'Фабричная Упаковка': 10,
-            'Паллет': 11
-          };
-
-          if (prunitMap[prunitId]) {
-            numericPrunitId = prunitMap[prunitId];
-            logger.info(`Преобразовано название единицы хранения "${prunitId}" в ID: ${numericPrunitId}`);
-          } else {
-            throw new Error(`Неизвестная единица хранения: ${prunitId}`);
-          }
-        }
-      }
-
       if (typeof quantity !== 'number' || quantity <= 0) {
         throw new Error('Некорректное количество');
       }
@@ -519,7 +469,7 @@ class StorageService {
 
       // Ищем товар в указанном местоположении
       const bufferItem = bufferStock.find(item =>
-        item.prunitId === numericPrunitId &&
+        item.prunitId === prunitId &&
         item.locationId === locationId
       );
 
@@ -555,12 +505,12 @@ class StorageService {
         // Если это полное изъятие, удаляем запись из буфера
         if (isFullRemoval) {
           // Удаляем запись из буфера
-          await this.repository.deleteFromBuffer(productId, numericPrunitId, locationId);
+          await this.repository.deleteFromBuffer(productId, prunitId, locationId);
         } else {
           // Обновляем количество в буфере
           await this.repository.updateBufferQuantity({
             productId,
-            prunitId: numericPrunitId,
+            prunitId,
             locationId,
             quantity: newQuantity,
             conditionState: bufferItem.conditionState,
@@ -574,7 +524,7 @@ class StorageService {
         await this.repository.logStorageOperation({
           operationType: 'изъятие_некондиция',
           productId,
-          prunitId: numericPrunitId,
+          prunitId,
           fromLocationId: locationId,
           toLocationId: null,
           quantity,
@@ -588,7 +538,7 @@ class StorageService {
           msg: 'Товар помечен как некондиция и изъят из буфера',
           data: {
             productId,
-            prunitId: numericPrunitId,
+            prunitId,
             locationId,
             removedQuantity: quantity,
             remainingQuantity: newQuantity,
@@ -613,12 +563,12 @@ class StorageService {
         // Если это полное изъятие, удаляем запись из буфера
         if (isFullRemoval) {
           // Удаляем запись из буфера
-          await this.repository.deleteFromBuffer(productId, numericPrunitId, locationId);
+          await this.repository.deleteFromBuffer(productId, prunitId, locationId);
         } else {
           // Обновляем количество в буфере
           await this.repository.updateBufferQuantity({
             productId,
-            prunitId: numericPrunitId,
+            prunitId,
             locationId,
             quantity: newQuantity,
             conditionState: bufferItem.conditionState,
@@ -631,7 +581,7 @@ class StorageService {
         // Добавляем товар в зону комплектации
         await this.repository.addToLocation({
           productId,
-          prunitId: numericPrunitId,
+          prunitId,
           locationId: targetLocationId,
           quantity,
           conditionState: 'кондиция',
@@ -643,7 +593,7 @@ class StorageService {
         await this.repository.logStorageOperation({
           operationType: 'перемещение',
           productId,
-          prunitId: numericPrunitId,
+          prunitId,
           fromLocationId: locationId,
           toLocationId: targetLocationId,
           quantity,
@@ -657,7 +607,7 @@ class StorageService {
           msg: 'Товар перемещен из буфера в зону комплектации',
           data: {
             productId,
-            prunitId: numericPrunitId,
+            prunitId,
             fromLocationId: locationId,
             toLocationId: targetLocationId,
             quantity,

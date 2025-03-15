@@ -69,6 +69,145 @@ const options = {
             }
           }
         },
+        BufferItem: {
+          type: 'object',
+          properties: {
+            productId: {
+              type: 'string',
+              description: 'Идентификатор товара'
+            },
+            prunitId: {
+              type: 'integer',
+              description: 'Идентификатор единицы хранения'
+            },
+            locationId: {
+              type: 'string',
+              description: 'Идентификатор местоположения в буфере'
+            },
+            quantity: {
+              type: 'number',
+              format: 'float',
+              description: 'Количество товара'
+            },
+            conditionState: {
+              type: 'string',
+              enum: ['кондиция', 'некондиция'],
+              description: 'Состояние товара'
+            },
+            expirationDate: {
+              type: 'string',
+              format: 'date',
+              description: 'Срок годности'
+            },
+            wrShk: {
+              type: 'string',
+              description: 'Штрих-код места хранения'
+            }
+          }
+        },
+        BufferOperation: {
+          type: 'object',
+          properties: {
+            operationType: {
+              type: 'string',
+              enum: ['приемка', 'перемещение', 'изъятие', 'изъятие_некондиция', 'обновление'],
+              description: 'Тип операции'
+            },
+            productId: {
+              type: 'string',
+              description: 'Идентификатор товара'
+            },
+            prunitId: {
+              type: 'integer',
+              description: 'Идентификатор единицы хранения'
+            },
+            fromLocationId: {
+              type: 'string',
+              description: 'Идентификатор исходного местоположения'
+            },
+            toLocationId: {
+              type: 'string',
+              description: 'Идентификатор целевого местоположения'
+            },
+            quantity: {
+              type: 'number',
+              format: 'float',
+              description: 'Количество товара'
+            },
+            conditionState: {
+              type: 'string',
+              enum: ['кондиция', 'некондиция'],
+              description: 'Состояние товара'
+            },
+            expirationDate: {
+              type: 'string',
+              format: 'date',
+              description: 'Срок годности'
+            },
+            executor: {
+              type: 'string',
+              description: 'Идентификатор исполнителя'
+            },
+            executedAt: {
+              type: 'string',
+              format: 'date-time',
+              description: 'Дата и время выполнения операции'
+            }
+          }
+        },
+        BufferReport: {
+          type: 'object',
+          properties: {
+            productId: {
+              type: 'string',
+              description: 'Идентификатор товара'
+            },
+            productName: {
+              type: 'string',
+              description: 'Наименование товара'
+            },
+            article: {
+              type: 'string',
+              description: 'Артикул товара'
+            },
+            shk: {
+              type: 'string',
+              description: 'Штрих-код товара'
+            },
+            prunitId: {
+              type: 'integer',
+              description: 'Идентификатор единицы хранения'
+            },
+            quantity: {
+              type: 'number',
+              format: 'float',
+              description: 'Количество товара'
+            },
+            locationId: {
+              type: 'string',
+              description: 'Идентификатор местоположения'
+            },
+            wrShk: {
+              type: 'string',
+              description: 'Штрих-код места хранения'
+            },
+            conditionState: {
+              type: 'string',
+              enum: ['кондиция', 'некондиция'],
+              description: 'Состояние товара'
+            },
+            expirationDate: {
+              type: 'string',
+              format: 'date',
+              description: 'Срок годности'
+            },
+            createdAt: {
+              type: 'string',
+              format: 'date-time',
+              description: 'Дата и время создания записи'
+            }
+          }
+        },
         ProductInfo: {
           type: 'object',
           properties: {

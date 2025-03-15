@@ -337,7 +337,7 @@ class StorageRepository {
           WR_SHK as wrShk
         FROM [SPOe_rc].[dbo].[x_Storage_Full_Info]
         WHERE ID = @productId
-          AND id_scklad LIKE 'BUFFER_%'
+          AND WR_SHK IS NOT NULL
         ORDER BY Expiration_Date DESC
       `;
 
@@ -373,7 +373,7 @@ class StorageRepository {
           p.Expiration_Date as expirationDate,
           p.Create_Date as createdAt
         FROM [SPOe_rc].[dbo].[x_Storage_Full_Info] p
-        WHERE p.Product_QNT > 0 AND p.id_scklad LIKE 'BUFFER_%'
+        WHERE p.Product_QNT > 0 AND p.WR_SHK IS NOT NULL
         ORDER BY p.Name, p.id_scklad
       `;
 

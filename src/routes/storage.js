@@ -190,6 +190,7 @@ router.put('/:productId/quantity', [
  * /api/storage/{productId}/buffer:
  *   post:
  *     summary: Размещение товара в буфер
+ *     description: Размещает товар в буферную зону, используя таблицу x_Storage_Full_Info. Использует поле WR_SHK для идентификации буферных зон.
  *     tags: [Склад]
  *     parameters:
  *       - in: path
@@ -211,8 +212,10 @@ router.put('/:productId/quantity', [
  *               - wrShk
  *             properties:
  *               prunitId:
- *                 type: string
- *                 description: ID единицы хранения
+ *                 oneOf:
+ *                   - type: string
+ *                   - type: number
+ *                 description: ID единицы хранения (может быть строкой или числом)
  *               quantity:
  *                 type: number
  *                 description: Количество
@@ -224,7 +227,7 @@ router.put('/:productId/quantity', [
  *                 description: Штрих-код места хранения
  *               conditionState:
  *                 type: string
- *                 enum: [кондиция, некондиция, good, bad]
+ *                 enum: [кондиция, некондиция]
  *                 description: Состояние товара
  *               expirationDate:
  *                 type: string
@@ -232,6 +235,31 @@ router.put('/:productId/quantity', [
  *     responses:
  *       200:
  *         description: Товар успешно размещен в буфер
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 msg:
+ *                   type: string
+ *                   example: Товар успешно размещен в буфер
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     quantity:
+ *                       type: number
+ *                     locationId:
+ *                       type: string
+ *                     wrShk:
+ *                       type: string
+ *                     conditionState:
+ *                       type: string
+ *                     expirationDate:
+ *                       type: string
+ *                       format: date
  *       400:
  *         description: Ошибка валидации параметров
  *       404:
@@ -241,7 +269,10 @@ router.put('/:productId/quantity', [
  */
 router.post('/:productId/buffer', [
   param('productId').isString().trim().notEmpty(),
-  body('prunitId').isString().trim().notEmpty(),
+  body('prunitId').custom(value => {
+    // Принимаем как строки, так и числа
+    return value !== undefined && value !== null && (typeof value === 'string' || typeof value === 'number');
+  }),
   body('quantity').isFloat({ min: 0.01 }),
   body('executor').isString().trim().notEmpty(),
   body('wrShk').isString().trim().notEmpty(),
@@ -791,7 +822,7 @@ router.post('/defects/register', [
  * /api/storage/reports/buffer:
  *   get:
  *     summary: Отчет по остаткам в буфере
- *     description: Возвращает отчет по остаткам товаров в буфере из таблицы x_Storage_Full_Info
+ *     description: Возвращает отчет по остаткам товаров в буфере из таблицы x_Storage_Full_Info. Выбирает записи, где WR_SHK не NULL.
  *     tags: [Склад]
  *     responses:
  *       200:
@@ -818,7 +849,9 @@ router.post('/defects/register', [
  *                       shk:
  *                         type: string
  *                       prunitId:
- *                         type: integer
+ *                         oneOf:
+ *                           - type: string
+ *                           - type: number
  *                       quantity:
  *                         type: number
  *                       locationId:
