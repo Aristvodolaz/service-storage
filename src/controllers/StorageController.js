@@ -369,13 +369,13 @@ class StorageController {
    */
   async pickFromLocation(req, res) {
     try {
-      const { productId, locationId, prunitId, quantity, executor } = req.body;
+      const { productId, WR_SHK, prunitId, quantity, executor } = req.body;
 
       logger.info('Запрос на снятие товара из ячейки:', req.body);
 
-      const result = await this.storageService.pickFromLocation({
+      const result = await storageService.pickFromLocation({
         productId,
-        locationId,
+        locationId: WR_SHK,
         prunitId,
         quantity: parseFloat(quantity),
         executor
@@ -400,13 +400,13 @@ class StorageController {
    */
   async pickFromLocationBySkladId(req, res) {
     try {
-      const { productId, locationId, prunitId, quantity, executor, sklad_id } = req.body;
+      const { productId, WR_SHK, prunitId, quantity, executor, sklad_id } = req.body;
 
       logger.info('Запрос на снятие товара из ячейки с учетом sklad_id:', req.body);
 
-      const result = await this.storageService.pickFromLocationBySkladId({
+      const result = await storageService.pickFromLocationBySkladId({
         productId,
-        locationId,
+        locationId: WR_SHK,
         prunitId,
         quantity: parseFloat(quantity),
         executor,
@@ -433,9 +433,14 @@ class StorageController {
   async getLocationItems(req, res) {
     try {
       const { locationId } = req.params;
+      // Проверяем оба возможных имени параметра
+      const sklad_id = req.query.sklad_id || req.query.id_sklad;
 
       logger.info('Получен запрос на инвентаризацию по ячейке');
       logger.info('ID ячейки:', locationId);
+      if (sklad_id) {
+        logger.info('ID склада:', sklad_id);
+      }
 
       if (!locationId) {
         logger.warn('Не указан ID ячейки');
@@ -446,17 +451,15 @@ class StorageController {
         });
       }
 
-      const result = await storageService.getLocationItems(locationId);
+      const result = await storageService.getLocationItems(locationId, sklad_id);
 
       if (!result.success) {
-        logger.warn('Инвентаризация по ячейке завершилась неудачей:', result.msg);
         return res.status(result.errorCode).json(result);
       }
 
-      logger.info('Инвентаризация по ячейке успешно завершена');
       return res.status(200).json(result);
     } catch (error) {
-      logger.error('Ошибка при инвентаризации по ячейке:', error);
+      logger.error('Ошибка при получении списка товаров в ячейке:', error);
       return res.status(500).json({
         success: false,
         errorCode: 500,
@@ -504,15 +507,15 @@ class StorageController {
   }
 
   /**
-   * Очистка ячейки (функция "Адрес пуст")
+   * Очистка ячейки (установка нулевого количества для всех товаров)
    */
   async clearLocation(req, res) {
     try {
       const { locationId } = req.params;
-      const { executor } = req.body;
+      const { executor, sklad_id } = req.body;
 
       logger.info('Получен запрос на очистку ячейки');
-      logger.info('Параметры запроса:', { locationId, executor });
+      logger.info('Параметры запроса:', { locationId, executor, sklad_id });
 
       if (!locationId || !executor) {
         logger.warn('Не указаны все обязательные параметры');
@@ -525,15 +528,14 @@ class StorageController {
 
       const result = await storageService.clearLocation({
         locationId,
-        executor
+        executor,
+        sklad_id
       });
 
       if (!result.success) {
-        logger.warn('Очистка ячейки завершилась неудачей:', result.msg);
         return res.status(result.errorCode).json(result);
       }
 
-      logger.info('Ячейка успешно очищена');
       return res.status(200).json(result);
     } catch (error) {
       logger.error('Ошибка при очистке ячейки:', error);

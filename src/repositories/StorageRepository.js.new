@@ -1,0 +1,48 @@
+/**
+   * Получение списка товаров в ячейке
+   */
+  async getLocationItems(locationId, id_scklad) {
+    try {
+      logger.info(`Получение списка товаров в ячейке: ${locationId}${id_scklad ? `, склад: ${id_scklad}` : ''}`);
+
+      // Формируем запрос с правильным экранированием для Oracle
+      let whereClause = `WHERE WR_SHK = ''${locationId}'' AND product_qnt > 0`;
+
+      // Добавляем условие по id_scklad, если оно указано
+      if (id_scklad) {
+        whereClause += ` AND id_scklad = ''${id_scklad}''`;
+      }
+
+      let query = `
+        SELECT * FROM OPENQUERY(OW,
+          'SELECT
+            id,
+            name,
+            article_id_real as article,
+            PIECE_GTIN as shk,
+            prunit_id,
+            prunit_name,
+            product_qnt,
+            place_qnt,
+            id_scklad,
+            name_scklad,
+            condition_state,
+            expiration_date,
+            start_expiration_date,
+            end_expiration_date
+          FROM wms.x_Storage_Full_Info
+          ${whereClause}
+          ORDER BY name'
+        )
+      `;
+
+      logger.info('SQL запрос для получения товаров в ячейке:', query);
+      const result = await this.pool.request().query(query);
+      logger.info(`Получено записей: ${result.recordset.length}`);
+
+      return result.recordset;
+    } catch (error) {
+      logger.error('Error in getLocationItems:', error);
+      throw error;
+    }
+  }

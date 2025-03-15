@@ -699,7 +699,7 @@ class StorageService {
   /**
    * Получение списка товаров в ячейке (инвентаризация по ячейке)
    */
-  async getLocationItems(locationId) {
+  async getLocationItems(locationId, id_scklad) {
     try {
       if (!this.repository) {
         await this.initialize();
@@ -709,7 +709,7 @@ class StorageService {
         throw new Error('Некорректный формат ID ячейки');
       }
 
-      const items = await this.repository.getLocationItems(locationId);
+      const items = await this.repository.getLocationItems(locationId, id_scklad);
 
       if (!items || items.length === 0) {
         return {
@@ -813,7 +813,7 @@ class StorageService {
   }
 
   /**
-   * Очистка ячейки (функция "Адрес пуст")
+   * Очистка ячейки (установка нулевого количества для всех товаров)
    */
   async clearLocation(params) {
     try {
@@ -821,7 +821,7 @@ class StorageService {
         await this.initialize();
       }
 
-      const { locationId, executor } = params;
+      const { locationId, executor, sklad_id } = params;
 
       if (typeof locationId !== 'string') {
         throw new Error('Некорректный формат ID ячейки');
@@ -831,7 +831,7 @@ class StorageService {
         throw new Error('Некорректный формат ID исполнителя');
       }
 
-      const result = await this.repository.clearLocation(locationId, executor);
+      const result = await this.repository.clearLocation(locationId, sklad_id, executor);
 
       if (!result.success) {
         return {
@@ -841,17 +841,14 @@ class StorageService {
         };
       }
 
-      return {
-        success: true,
-        msg: result.message,
-        data: {
-          locationId,
-          clearedItems: result.clearedItems
-        }
-      };
+      return result;
     } catch (error) {
       logger.error('Ошибка при очистке ячейки:', error);
-      throw error;
+      return {
+        success: false,
+        errorCode: 500,
+        msg: 'Внутренняя ошибка сервера'
+      };
     }
   }
 

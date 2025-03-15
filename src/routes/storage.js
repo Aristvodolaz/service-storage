@@ -443,17 +443,11 @@ router.post('/:productId/buffer/move', [
 
 /**
  * @swagger
- * /api/storage/{productId}/location/pick:
+ * /api/storage/pick-from-location:
  *   post:
- *     summary: Забор товара из ячейки
+ *     summary: Снятие товара из ячейки
+ *     description: Снимает указанное количество товара из ячейки хранения
  *     tags: [Склад]
- *     parameters:
- *       - in: path
- *         name: productId
- *         required: true
- *         schema:
- *           type: string
- *         description: ID товара
  *     requestBody:
  *       required: true
  *       content:
@@ -461,41 +455,161 @@ router.post('/:productId/buffer/move', [
  *           schema:
  *             type: object
  *             required:
- *               - locationId
+ *               - productId
+ *               - WR_SHK
  *               - prunitId
  *               - quantity
  *               - executor
  *             properties:
- *               locationId:
+ *               productId:
  *                 type: string
- *                 description: ID ячейки
+ *                 description: ID товара
+ *               WR_SHK:
+ *                 type: string
+ *                 description: Штрих-код ячейки
  *               prunitId:
  *                 type: string
  *                 description: ID единицы хранения
  *               quantity:
  *                 type: number
- *                 description: Количество
+ *                 description: Количество товара для снятия
  *               executor:
  *                 type: string
- *                 description: ID исполнителя
+ *                 description: ID исполнителя операции
  *     responses:
  *       200:
- *         description: Товар успешно изъят из ячейки
+ *         description: Товар успешно снят из ячейки
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: Товар успешно снят из ячейки
+ *                 data:
+ *                   type: object
  *       400:
- *         description: Ошибка валидации параметров или недостаточное количество
+ *         description: Ошибка в запросе или недостаточное количество товара
  *       404:
  *         description: Товар не найден в указанной ячейке
  *       500:
  *         description: Внутренняя ошибка сервера
  */
-router.post('/:productId/location/pick', [
-  param('productId').isString().trim().notEmpty(),
-  body('locationId').isString().trim().notEmpty(),
-  body('prunitId').isString().trim().notEmpty(),
-  body('quantity').isFloat({ min: 0.01 }),
-  body('executor').isString().trim().notEmpty(),
-  validate
-], storageController.pickFromLocation);
+router.post('/pick-from-location', [
+  body('productId').isString().notEmpty(),
+  body('WR_SHK').isString().notEmpty(),
+  body('prunitId').isString().notEmpty(),
+  body('quantity').isNumeric().toFloat(),
+  body('executor').isString().notEmpty()
+], validate, storageController.pickFromLocation.bind(storageController));
+
+/**
+ * @swagger
+ * /api/storage/pick-from-location-by-sklad-id:
+ *   post:
+ *     summary: Снятие товара из ячейки с учетом поля sklad_id
+ *     description: Снимает указанное количество товара из ячейки хранения с учетом идентификатора склада
+ *     tags: [Склад]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - productId
+ *               - WR_SHK
+ *               - prunitId
+ *               - quantity
+ *               - executor
+ *             properties:
+ *               productId:
+ *                 type: string
+ *                 description: ID товара
+ *               WR_SHK:
+ *                 type: string
+ *                 description: Штрих-код ячейки
+ *               prunitId:
+ *                 type: string
+ *                 description: ID единицы хранения
+ *               quantity:
+ *                 type: number
+ *                 description: Количество товара для снятия
+ *               executor:
+ *                 type: string
+ *                 description: ID исполнителя операции
+ *               sklad_id:
+ *                 type: string
+ *                 description: ID склада. Если указан, то снятие товара будет произведено только для товаров с указанным ID склада в данной ячейке.
+ *     responses:
+ *       200:
+ *         description: Товар успешно снят из ячейки
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: Товар успешно снят из ячейки
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: string
+ *                       description: ID товара
+ *                     locationId:
+ *                       type: string
+ *                       description: ID ячейки
+ *                     prunitId:
+ *                       type: string
+ *                       description: ID единицы хранения
+ *                     name:
+ *                       type: string
+ *                       description: Наименование товара
+ *                     article:
+ *                       type: string
+ *                       description: Артикул товара
+ *                     shk:
+ *                       type: string
+ *                       description: Штрих-код товара
+ *                     conditionState:
+ *                       type: string
+ *                       description: Состояние товара
+ *                     previousQuantity:
+ *                       type: number
+ *                       description: Предыдущее количество товара
+ *                     newQuantity:
+ *                       type: number
+ *                       description: Новое количество товара
+ *                     pickedQuantity:
+ *                       type: number
+ *                       description: Снятое количество товара
+ *                     isDeleted:
+ *                       type: boolean
+ *                       description: Флаг удаления записи (если количество стало нулевым)
+ *       400:
+ *         description: Ошибка в запросе или недостаточное количество товара
+ *       404:
+ *         description: Товар не найден в указанной ячейке с указанным ID склада
+ *       500:
+ *         description: Внутренняя ошибка сервера
+ */
+router.post('/pick-from-location-by-sklad-id', [
+  body('productId').isString().notEmpty(),
+  body('WR_SHK').isString().notEmpty(),
+  body('prunitId').isString().notEmpty(),
+  body('quantity').isNumeric().toFloat(),
+  body('executor').isString().notEmpty(),
+  body('sklad_id').optional().isString()
+], validate, storageController.pickFromLocationBySkladId.bind(storageController));
 
 /**
  * @swagger
@@ -530,6 +644,7 @@ router.get('/search/article', [
  * /api/storage/inventory/location/{locationId}:
  *   get:
  *     summary: Инвентаризация по ячейке
+ *     description: Получение списка товаров в указанной ячейке
  *     tags: [Склад]
  *     parameters:
  *       - in: path
@@ -538,11 +653,56 @@ router.get('/search/article', [
  *         schema:
  *           type: string
  *         description: ID ячейки
+ *       - in: query
+ *         name: sklad_id
+ *         required: false
+ *         schema:
+ *           type: string
+ *         description: ID склада (опционально). Если указан, то будут возвращены только товары с указанным ID склада в данной ячейке.
+ *       - in: query
+ *         name: id_sklad
+ *         required: false
+ *         schema:
+ *           type: string
+ *         description: Альтернативное имя для параметра sklad_id. Если указан, то будут возвращены только товары с указанным ID склада в данной ячейке.
  *     responses:
  *       200:
- *         description: Список товаров в ячейке
+ *         description: Успешное получение списка товаров
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       id:
+ *                         type: string
+ *                         description: ID товара
+ *                       name:
+ *                         type: string
+ *                         description: Наименование товара
+ *                       article:
+ *                         type: string
+ *                         description: Артикул товара
+ *                       shk:
+ *                         type: string
+ *                         description: Штрих-код товара
+ *                       prunit_id:
+ *                         type: string
+ *                       prunit_name:
+ *                         type: string
+ *                       product_qnt:
+ *                         type: number
+ *                       id_scklad:
+ *                         type: string
  *       400:
- *         description: Ошибка валидации параметров
+ *         description: Некорректные параметры запроса
  *       404:
  *         description: Товары в ячейке не найдены
  *       500:
@@ -550,6 +710,8 @@ router.get('/search/article', [
  */
 router.get('/inventory/location/:locationId', [
   param('locationId').isString().trim().notEmpty(),
+  query('sklad_id').optional().isString().trim(),
+  query('id_sklad').optional().isString().trim(),
   validate
 ], storageController.getLocationItems);
 
@@ -583,9 +745,10 @@ router.get('/inventory/article/:article', [
 
 /**
  * @swagger
- * /api/storage/inventory/location/{locationId}/clear:
+ * /api/storage/location/{locationId}/clear:
  *   post:
- *     summary: Очистка ячейки (функция "Адрес пуст")
+ *     summary: Очистка ячейки
+ *     description: Установка нулевого количества для всех товаров в ячейке
  *     tags: [Склад]
  *     parameters:
  *       - in: path
@@ -605,18 +768,62 @@ router.get('/inventory/article/:article', [
  *             properties:
  *               executor:
  *                 type: string
- *                 description: ID исполнителя
+ *                 description: ID исполнителя операции
+ *               sklad_id:
+ *                 type: string
+ *                 description: ID склада (опционально). Если указан, то очистка будет произведена только для товаров с указанным ID склада в данной ячейке.
  *     responses:
  *       200:
  *         description: Ячейка успешно очищена
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: Ячейка очищена
+ *                 clearedItems:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       id:
+ *                         type: string
+ *                         description: ID товара
+ *                       name:
+ *                         type: string
+ *                         description: Наименование товара
+ *                       article:
+ *                         type: string
+ *                         description: Артикул товара
+ *                       shk:
+ *                         type: string
+ *                         description: Штрих-код товара
+ *                       prunitId:
+ *                         type: string
+ *                         description: ID единицы хранения
+ *                       prunitName:
+ *                         type: string
+ *                         description: Наименование единицы хранения
+ *                       previousQuantity:
+ *                         type: number
+ *                         description: Предыдущее количество товара
+ *                       newQuantity:
+ *                         type: number
+ *                         description: Новое количество товара (всегда 0)
  *       400:
- *         description: Ошибка валидации параметров
+ *         description: Некорректные параметры запроса
  *       500:
  *         description: Внутренняя ошибка сервера
  */
-router.post('/inventory/location/:locationId/clear', [
+router.post('/location/:locationId/clear', [
   param('locationId').isString().trim().notEmpty(),
   body('executor').isString().trim().notEmpty(),
+  body('sklad_id').optional().isString().trim(),
   validate
 ], storageController.clearLocation);
 
@@ -995,114 +1202,6 @@ router.get('/reports/inventory', storageController.getInventoryReport);
 
 /**
  * @swagger
- * /api/storage/pick-from-location:
- *   post:
- *     summary: Снятие товара из ячейки
- *     tags: [Storage]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - productId
- *               - locationId
- *               - prunitId
- *               - quantity
- *               - executor
- *             properties:
- *               productId:
- *                 type: string
- *                 description: ID товара
- *               locationId:
- *                 type: string
- *                 description: ID ячейки
- *               prunitId:
- *                 type: string
- *                 description: ID единицы хранения
- *               quantity:
- *                 type: number
- *                 description: Количество товара для снятия
- *               executor:
- *                 type: string
- *                 description: ID исполнителя операции
- *     responses:
- *       200:
- *         description: Товар успешно снят из ячейки
- *       400:
- *         description: Ошибка в запросе
- *       404:
- *         description: Товар не найден
- *       500:
- *         description: Внутренняя ошибка сервера
- */
-router.post('/pick-from-location', [
-  body('productId').isString().notEmpty(),
-  body('locationId').isString().notEmpty(),
-  body('prunitId').isString().notEmpty(),
-  body('quantity').isNumeric().toFloat(),
-  body('executor').isString().notEmpty()
-], validateRequest, storageController.pickFromLocation.bind(storageController));
-
-/**
- * @swagger
- * /api/storage/pick-from-location-by-sklad-id:
- *   post:
- *     summary: Снятие товара из ячейки с учетом поля sklad_id
- *     tags: [Storage]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - productId
- *               - locationId
- *               - prunitId
- *               - quantity
- *               - executor
- *             properties:
- *               productId:
- *                 type: string
- *                 description: ID товара
- *               locationId:
- *                 type: string
- *                 description: ID ячейки
- *               prunitId:
- *                 type: string
- *                 description: ID единицы хранения
- *               quantity:
- *                 type: number
- *                 description: Количество товара для снятия
- *               executor:
- *                 type: string
- *                 description: ID исполнителя операции
- *               sklad_id:
- *                 type: string
- *                 description: ID склада
- *     responses:
- *       200:
- *         description: Товар успешно снят из ячейки
- *       400:
- *         description: Ошибка в запросе
- *       404:
- *         description: Товар не найден
- *       500:
- *         description: Внутренняя ошибка сервера
- */
-router.post('/pick-from-location-by-sklad-id', [
-  body('productId').isString().notEmpty(),
-  body('locationId').isString().notEmpty(),
-  body('prunitId').isString().notEmpty(),
-  body('quantity').isNumeric().toFloat(),
-  body('executor').isString().notEmpty(),
-  body('sklad_id').optional().isString()
-], validateRequest, storageController.pickFromLocationBySkladId.bind(storageController));
-
-/**
- * @swagger
  * /api/storage/location-items/{locationId}:
  *   get:
  *     summary: Получение списка товаров в ячейке
@@ -1114,6 +1213,12 @@ router.post('/pick-from-location-by-sklad-id', [
  *         schema:
  *           type: string
  *         description: ID ячейки
+ *       - in: query
+ *         name: id_sklad
+ *         required: false
+ *         schema:
+ *           type: string
+ *         description: ID склада (опционально). Если указан, то будут возвращены только товары с указанным ID склада в данной ячейке.
  *     responses:
  *       200:
  *         description: Список товаров в ячейке
@@ -1126,6 +1231,7 @@ router.post('/pick-from-location-by-sklad-id', [
  */
 router.get('/location-items/:locationId', [
   param('locationId').isString().trim().notEmpty(),
+  query('id_sklad').optional().isString().trim(),
   validate
 ], storageController.getLocationItems);
 
