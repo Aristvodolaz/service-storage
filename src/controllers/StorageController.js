@@ -161,7 +161,8 @@ class StorageController {
         expirationDate,
         name,
         article,
-        shk
+        shk,
+        sklad_id
       } = req.body;
 
       logger.info('Получен запрос на размещение товара в буфер');
@@ -175,7 +176,8 @@ class StorageController {
         expirationDate,
         name,
         article,
-        shk
+        shk,
+        sklad_id
       });
 
       // Проверяем наличие обязательных параметров
@@ -189,9 +191,10 @@ class StorageController {
       }
 
       // Проверка корректности состояния товара
+      let normalizedCondition = 'кондиция'; // Значение по умолчанию
       if (conditionState) {
         // Преобразуем значения для совместимости
-        let normalizedCondition = conditionState.toLowerCase();
+        normalizedCondition = conditionState.toLowerCase();
         if (normalizedCondition === 'bad' || normalizedCondition === 'некондиция') {
           normalizedCondition = 'некондиция';
         } else if (normalizedCondition === 'good' || normalizedCondition === 'кондиция') {
@@ -252,7 +255,8 @@ class StorageController {
         expirationDate: parsedDate,
         name,
         article,
-        shk
+        shk,
+        sklad_id
       });
 
       if (!result.success) {
@@ -361,57 +365,64 @@ class StorageController {
   }
 
   /**
-   * Забор товара из ячейки
+   * Снятие товара из ячейки
    */
   async pickFromLocation(req, res) {
     try {
-      const { productId } = req.params;
-      const { locationId, prunitId, quantity, executor } = req.body;
+      const { productId, locationId, prunitId, quantity, executor } = req.body;
 
-      logger.info('Получен запрос на забор товара из ячейки');
-      logger.info('Параметры запроса:', { productId, locationId, prunitId, quantity, executor });
+      logger.info('Запрос на снятие товара из ячейки:', req.body);
 
-      if (!productId || !locationId || !prunitId || !quantity || !executor) {
-        logger.warn('Не указаны все обязательные параметры');
-        return res.status(400).json({
-          success: false,
-          errorCode: 400,
-          msg: 'Необходимо указать все обязательные параметры'
-        });
-      }
-
-      // Проверяем, что количество является числом
-      const parsedQuantity = parseFloat(quantity);
-      if (isNaN(parsedQuantity) || parsedQuantity <= 0) {
-        logger.warn('Некорректное значение количества:', quantity);
-        return res.status(400).json({
-          success: false,
-          errorCode: 400,
-          msg: 'Количество должно быть положительным числом'
-        });
-      }
-
-      const result = await storageService.pickFromLocation({
+      const result = await this.storageService.pickFromLocation({
         productId,
         locationId,
         prunitId,
-        quantity: parsedQuantity,
+        quantity: parseFloat(quantity),
         executor
       });
 
-      if (!result.success) {
-        logger.warn('Забор товара завершился неудачей:', result.msg);
-        return res.status(result.errorCode).json(result);
-      }
-
-      logger.info('Товар успешно изъят из ячейки');
-      return res.status(200).json(result);
+      return res.status(200).json({
+        success: true,
+        message: 'Товар успешно снят из ячейки',
+        data: result
+      });
     } catch (error) {
-      logger.error('Ошибка при заборе товара из ячейки:', error);
+      logger.error('Ошибка при снятии товара из ячейки:', error);
       return res.status(500).json({
         success: false,
-        errorCode: 500,
-        msg: 'Внутренняя ошибка сервера'
+        message: `Внутренняя ошибка сервера: ${error.message}`
+      });
+    }
+  }
+
+  /**
+   * Снятие товара из ячейки с учетом поля sklad_id
+   */
+  async pickFromLocationBySkladId(req, res) {
+    try {
+      const { productId, locationId, prunitId, quantity, executor, sklad_id } = req.body;
+
+      logger.info('Запрос на снятие товара из ячейки с учетом sklad_id:', req.body);
+
+      const result = await this.storageService.pickFromLocationBySkladId({
+        productId,
+        locationId,
+        prunitId,
+        quantity: parseFloat(quantity),
+        executor,
+        sklad_id
+      });
+
+      return res.status(200).json({
+        success: true,
+        message: 'Товар успешно снят из ячейки',
+        data: result
+      });
+    } catch (error) {
+      logger.error('Ошибка при снятии товара из ячейки:', error);
+      return res.status(500).json({
+        success: false,
+        message: `Внутренняя ошибка сервера: ${error.message}`
       });
     }
   }

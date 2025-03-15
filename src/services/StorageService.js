@@ -306,7 +306,8 @@ class StorageService {
         expirationDate,
         name,
         article,
-        shk
+        shk,
+        sklad_id
       } = params;
 
       logger.info('Начало выполнения moveToBuffer');
@@ -369,7 +370,8 @@ class StorageService {
           executor,
           name,
           article,
-          shk
+          shk,
+          sklad_id
         });
 
         if (!result) {
@@ -405,7 +407,8 @@ class StorageService {
           executor,
           name,
           article,
-          shk
+          shk,
+          sklad_id
         });
 
         if (!result) {
@@ -638,66 +641,57 @@ class StorageService {
   }
 
   /**
-   * Забор товара из ячейки
+   * Снятие товара из ячейки
    */
-  async pickFromLocation(params) {
+  async pickFromLocation(data) {
     try {
-      if (!this.repository) {
-        await this.initialize();
+      const { productId, locationId, prunitId, quantity, executor } = data;
+
+      if (!productId || !locationId || !prunitId || !quantity || !executor) {
+        throw new Error('Не все обязательные параметры указаны');
       }
 
-      const { productId, locationId, prunitId, quantity, executor } = params;
-
-      // Проверка корректности входных данных
-      if (typeof productId !== 'string') {
-        throw new Error('Некорректный формат ID товара');
-      }
-      if (typeof locationId !== 'string') {
-        throw new Error('Некорректный формат ID ячейки');
-      }
-      if (typeof prunitId !== 'string') {
-        throw new Error('Некорректный формат ID единицы хранения');
-      }
-      if (typeof quantity !== 'number' || quantity <= 0) {
-        throw new Error('Некорректное количество');
-      }
-      if (typeof executor !== 'string') {
-        throw new Error('Некорректный формат ID исполнителя');
-      }
-
-      // Выполняем забор товара
-      const result = await this.repository.pickFromLocation({
-        productId,
-        locationId,
-        prunitId,
-        quantity,
-        executor
-      });
+      const result = await this.repository.pickFromLocation(data);
 
       if (!result) {
-        return {
-          success: false,
-          errorCode: 404,
-          msg: 'Товар не найден в указанной ячейке'
-        };
+        throw new Error('Товар не найден в указанной ячейке');
       }
 
       if (result.error === 'insufficient_quantity') {
-        return {
-          success: false,
-          errorCode: 400,
-          msg: `Недостаточное количество товара. Доступно: ${result.available}`,
-          available: result.available
-        };
+        throw new Error(`Недостаточное количество товара: доступно ${result.available}, запрошено ${quantity}`);
       }
 
-      return {
-        success: true,
-        msg: 'Товар успешно изъят из ячейки',
-        data: result
-      };
+      return result;
     } catch (error) {
-      logger.error('Ошибка при заборе товара из ячейки:', error);
+      logger.error('Error in pickFromLocation service:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Снятие товара из ячейки с учетом поля sklad_id
+   */
+  async pickFromLocationBySkladId(data) {
+    try {
+      const { productId, locationId, prunitId, quantity, executor, sklad_id } = data;
+
+      if (!productId || !locationId || !prunitId || !quantity || !executor) {
+        throw new Error('Не все обязательные параметры указаны');
+      }
+
+      const result = await this.repository.pickFromLocationBySkladId(data);
+
+      if (!result) {
+        throw new Error('Товар не найден в указанной ячейке');
+      }
+
+      if (result.error === 'insufficient_quantity') {
+        throw new Error(`Недостаточное количество товара: доступно ${result.available}, запрошено ${quantity}`);
+      }
+
+      return result;
+    } catch (error) {
+      logger.error('Error in pickFromLocationBySkladId service:', error);
       throw error;
     }
   }

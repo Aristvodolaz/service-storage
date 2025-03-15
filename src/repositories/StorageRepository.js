@@ -555,6 +555,149 @@ class StorageRepository {
   }
 
   /**
+   * Снятие товара из ячейки с учетом поля sklad_id
+   */
+  async pickFromLocationBySkladId(data) {
+    try {
+      const { productId, locationId, prunitId, quantity, executor, sklad_id } = data;
+
+      logger.info('Забор товара из ячейки по sklad_id:', JSON.stringify(data));
+
+      // Проверяем наличие товара в указанной ячейке
+      let checkQuery = `
+        SELECT ID, Name, Article, SHK, Prunit_Id, Prunit_Name, Product_QNT, Place_QNT, id_scklad
+        FROM [SPOe_rc].[dbo].[x_Storage_Full_Info]
+        WHERE ID = @productId
+          AND Prunit_Id = @prunitId
+          AND id_scklad = @locationId
+      `;
+
+      if (sklad_id) {
+        checkQuery += ` AND id_scklad = @sklad_id`;
+      }
+
+      logger.info('SQL запрос для проверки наличия товара:', checkQuery);
+
+      const checkRequest = this.pool.request()
+        .input('productId', productId)
+        .input('prunitId', prunitId)
+        .input('locationId', locationId);
+
+      if (sklad_id) {
+        checkRequest.input('sklad_id', sklad_id);
+      }
+
+      const result = await checkRequest.query(checkQuery);
+
+      if (result.recordset.length === 0) {
+        logger.warn('Товар не найден в указанной ячейке');
+        return null;
+      }
+
+      const item = result.recordset[0];
+
+      // Проверяем достаточное количество
+      const currentQuantity = parseFloat(item.Product_QNT) || 0;
+      const requestedQuantity = parseFloat(quantity) || 0;
+
+      if (currentQuantity < requestedQuantity) {
+        logger.warn(`Недостаточное количество товара: доступно ${currentQuantity}, запрошено ${requestedQuantity}`);
+        return { error: 'insufficient_quantity', available: currentQuantity };
+      }
+
+      const newQuantity = currentQuantity - requestedQuantity;
+
+      if (newQuantity <= 0) {
+        // Если количество становится нулевым или отрицательным, удаляем запись
+        logger.info('Количество товара стало нулевым, удаляем запись');
+
+        let deleteQuery = `
+          DELETE FROM [SPOe_rc].[dbo].[x_Storage_Full_Info]
+          WHERE ID = @productId
+          AND Prunit_Id = @prunitId
+          AND id_scklad = @locationId
+        `;
+
+        if (sklad_id) {
+          deleteQuery += ` AND id_scklad = @sklad_id`;
+        }
+
+        logger.info('SQL запрос для удаления записи:', deleteQuery);
+
+        const deleteRequest = this.pool.request()
+          .input('productId', productId)
+          .input('prunitId', prunitId)
+          .input('locationId', locationId);
+
+        if (sklad_id) {
+          deleteRequest.input('sklad_id', sklad_id);
+        }
+
+        await deleteRequest.query(deleteQuery);
+      } else {
+        // Обновляем количество товара в ячейке
+        let updateQuery = `
+          UPDATE [SPOe_rc].[dbo].[x_Storage_Full_Info]
+          SET Product_QNT = @newQuantity,
+              Place_QNT = @newQuantity,
+              Update_Date = GETDATE(),
+              Executor = @executor
+          WHERE ID = @productId
+          AND Prunit_Id = @prunitId
+          AND id_scklad = @locationId
+        `;
+
+        if (sklad_id) {
+          updateQuery += ` AND id_scklad = @sklad_id`;
+        }
+
+        logger.info('SQL запрос для обновления количества:', updateQuery);
+
+        const updateRequest = this.pool.request()
+          .input('productId', productId)
+          .input('prunitId', prunitId)
+          .input('locationId', locationId)
+          .input('newQuantity', newQuantity)
+          .input('executor', executor);
+
+        if (sklad_id) {
+          updateRequest.input('sklad_id', sklad_id);
+        }
+
+        await updateRequest.query(updateQuery);
+      }
+
+      // Логируем операцию
+      await this.logStorageOperation({
+        operationType: 'изъятие',
+        productId,
+        prunitId,
+        fromLocationId: locationId,
+        toLocationId: null,
+        quantity: requestedQuantity,
+        conditionState: item.Condition_State || 'кондиция',
+        executor
+      });
+
+      return {
+        id: productId,
+        locationId: locationId,
+        prunitId: prunitId,
+        name: item.Name,
+        article: item.Article,
+        shk: item.SHK,
+        previousQuantity: currentQuantity,
+        newQuantity: newQuantity,
+        pickedQuantity: requestedQuantity,
+        isDeleted: newQuantity <= 0
+      };
+    } catch (error) {
+      logger.error('Error in pickFromLocationBySkladId:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Получение списка товаров в ячейке
    */
   async getLocationItems(locationId) {

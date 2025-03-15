@@ -993,4 +993,140 @@ router.get('/reports/defects', storageController.getDefectsReport);
  */
 router.get('/reports/inventory', storageController.getInventoryReport);
 
+/**
+ * @swagger
+ * /api/storage/pick-from-location:
+ *   post:
+ *     summary: Снятие товара из ячейки
+ *     tags: [Storage]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - productId
+ *               - locationId
+ *               - prunitId
+ *               - quantity
+ *               - executor
+ *             properties:
+ *               productId:
+ *                 type: string
+ *                 description: ID товара
+ *               locationId:
+ *                 type: string
+ *                 description: ID ячейки
+ *               prunitId:
+ *                 type: string
+ *                 description: ID единицы хранения
+ *               quantity:
+ *                 type: number
+ *                 description: Количество товара для снятия
+ *               executor:
+ *                 type: string
+ *                 description: ID исполнителя операции
+ *     responses:
+ *       200:
+ *         description: Товар успешно снят из ячейки
+ *       400:
+ *         description: Ошибка в запросе
+ *       404:
+ *         description: Товар не найден
+ *       500:
+ *         description: Внутренняя ошибка сервера
+ */
+router.post('/pick-from-location', [
+  body('productId').isString().notEmpty(),
+  body('locationId').isString().notEmpty(),
+  body('prunitId').isString().notEmpty(),
+  body('quantity').isNumeric().toFloat(),
+  body('executor').isString().notEmpty()
+], validateRequest, storageController.pickFromLocation.bind(storageController));
+
+/**
+ * @swagger
+ * /api/storage/pick-from-location-by-sklad-id:
+ *   post:
+ *     summary: Снятие товара из ячейки с учетом поля sklad_id
+ *     tags: [Storage]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - productId
+ *               - locationId
+ *               - prunitId
+ *               - quantity
+ *               - executor
+ *             properties:
+ *               productId:
+ *                 type: string
+ *                 description: ID товара
+ *               locationId:
+ *                 type: string
+ *                 description: ID ячейки
+ *               prunitId:
+ *                 type: string
+ *                 description: ID единицы хранения
+ *               quantity:
+ *                 type: number
+ *                 description: Количество товара для снятия
+ *               executor:
+ *                 type: string
+ *                 description: ID исполнителя операции
+ *               sklad_id:
+ *                 type: string
+ *                 description: ID склада
+ *     responses:
+ *       200:
+ *         description: Товар успешно снят из ячейки
+ *       400:
+ *         description: Ошибка в запросе
+ *       404:
+ *         description: Товар не найден
+ *       500:
+ *         description: Внутренняя ошибка сервера
+ */
+router.post('/pick-from-location-by-sklad-id', [
+  body('productId').isString().notEmpty(),
+  body('locationId').isString().notEmpty(),
+  body('prunitId').isString().notEmpty(),
+  body('quantity').isNumeric().toFloat(),
+  body('executor').isString().notEmpty(),
+  body('sklad_id').optional().isString()
+], validateRequest, storageController.pickFromLocationBySkladId.bind(storageController));
+
+/**
+ * @swagger
+ * /api/storage/location-items/{locationId}:
+ *   get:
+ *     summary: Получение списка товаров в ячейке
+ *     tags: [Склад]
+ *     parameters:
+ *       - in: path
+ *         name: locationId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: ID ячейки
+ *     responses:
+ *       200:
+ *         description: Список товаров в ячейке
+ *       400:
+ *         description: Ошибка валидации параметров
+ *       404:
+ *         description: Товары в ячейке не найдены
+ *       500:
+ *         description: Внутренняя ошибка сервера
+ */
+router.get('/location-items/:locationId', [
+  param('locationId').isString().trim().notEmpty(),
+  validate
+], storageController.getLocationItems);
+
 module.exports = router;
