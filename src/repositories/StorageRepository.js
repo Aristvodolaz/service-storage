@@ -607,7 +607,7 @@ class StorageRepository {
       let checkQuery = `
         SELECT ID, Name, Article, SHK, Prunit_Id, Prunit_Name, Product_QNT, Place_QNT, id_scklad, Condition_State
         FROM [SPOe_rc].[dbo].[x_Storage_Full_Info]
-        WHERE ID = @productId
+        WHERE article = @productId
           AND Prunit_Id = @prunitId
           AND WR_SHK = @locationId
       `;
