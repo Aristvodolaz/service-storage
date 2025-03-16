@@ -93,58 +93,31 @@ class StorageService {
     try {
       logger.info('Получение информации о товаре:', { productId, shk, article, wrShk });
 
-      if (!productId && !shk && !article && !wrShk) {
-        return {
-          success: false,
-          errorCode: 400,
-          msg: 'Необходимо указать ID товара, ШК, артикул или ШК ячейки'
-        };
-      }
-
+      // Если параметры не указаны, возвращаем все записи
       const pool = await connectToDatabase();
       let query = `
         SELECT
-          p.id as product_id,
-          p.name as product_name,
-          p.article,
-          p.shk,
-          pu.id as prunit_id,
-          pu.name as prunit_name,
-          sl.id as location_id,
-          sl.wr_shk,
-          sl.name as location_name,
-          sl.zone,
-          sl.rack,
-          sl.shelf,
-          sl.position,
-          sl.quantity,
-          sl.condition_state,
-          sl.expiration_date,
-          sl.created_at,
-          sl.updated_at,
-          sl.created_by,
-          sl.updated_by
-        FROM wms.products p
-        LEFT JOIN wms.product_units pu ON p.id = pu.product_id
-        LEFT JOIN wms.storage_locations sl ON pu.id = sl.prunit_id
+        *
+        FROM x_Storage_Full_Info
         WHERE 1=1
       `;
 
       const params = [];
+
       if (productId) {
-        query += ` AND p.id = @productId`;
+        query += ` AND ID = @productId`;
         params.push({ name: 'productId', value: productId });
       }
       if (shk) {
-        query += ` AND p.shk = @shk`;
-        params.push({ name: 'shk', value: shk });
+        query += ` AND SHK = @shk`;
+        params.push({ name: 'shk', value: shk }); image.png
       }
       if (article) {
-        query += ` AND p.article = @article`;
+        query += ` AND Article = @article`;
         params.push({ name: 'article', value: article });
       }
       if (wrShk) {
-        query += ` AND sl.wr_shk = @wrShk`;
+        query += ` AND WR_SHK = @wrShk`;
         params.push({ name: 'wrShk', value: wrShk });
       }
 
@@ -169,43 +142,44 @@ class StorageService {
         };
       }
 
+      // Если параметры не указаны, возвращаем все записи без группировки
+      if (!productId && !shk && !article && !wrShk) {
+        return {
+          success: true,
+          data: result.recordset
+        };
+      }
+
       // Группируем результаты по товарам
       const products = {};
       result.recordset.forEach(record => {
-        if (!products[record.product_id]) {
-          products[record.product_id] = {
-            id: record.product_id,
-            name: record.product_name,
-            article: record.article,
-            shk: record.shk,
+        if (!products[record.ID]) {
+          products[record.ID] = {
+            id: record.ID,
+            name: record.Name,
+            article: record.Article,
+            shk: record.SHK,
             units: {}
           };
         }
 
-        if (record.prunit_id && !products[record.product_id].units[record.prunit_id]) {
-          products[record.product_id].units[record.prunit_id] = {
-            id: record.prunit_id,
-            name: record.prunit_name,
+        if (record.Prunit_Id && !products[record.ID].units[record.Prunit_Id]) {
+          products[record.ID].units[record.Prunit_Id] = {
+            id: record.Prunit_Id,
+            name: record.Prunit_Name,
             locations: []
           };
         }
 
-        if (record.location_id) {
-          products[record.product_id].units[record.prunit_id].locations.push({
-            id: record.location_id,
-            wrShk: record.wr_shk,
-            name: record.location_name,
-            zone: record.zone,
-            rack: record.rack,
-            shelf: record.shelf,
-            position: record.position,
-            quantity: record.quantity,
-            conditionState: record.condition_state,
-            expirationDate: record.expiration_date,
-            createdAt: record.created_at,
-            updatedAt: record.updated_at,
-            createdBy: record.created_by,
-            updatedBy: record.updated_by
+        if (record.WR_SHK) {
+          products[record.ID].units[record.Prunit_Id].locations.push({
+            wrShk: record.WR_SHK,
+            quantity: record.Place_QNT,
+            conditionState: record.Condition_State,
+            expirationDate: record.Expiration_Date,
+            createdAt: record.Create_Date,
+            updatedAt: record.Update_Date,
+            idScklad: record.id_scklad
           });
         }
       });
@@ -665,7 +639,8 @@ class StorageService {
             name: item.name,
             article: item.article,
             shk: item.shk,
-            locationId: item.id_scklad,
+            idSklad: item.id_scklad,
+            wrShk: item.wr_shk,
             locationName: item.name_scklad,
             units: []
           };
@@ -864,12 +839,12 @@ class StorageService {
         productId,
         sourceLocationId,
         targetLocationId,
-        targetWrShk,
         prunitId,
         quantity,
         conditionState,
         expirationDate,
-        executor
+        executor,
+        id_sklad
       } = params;
 
       // Проверка корректности входных данных
@@ -881,9 +856,6 @@ class StorageService {
       }
       if (typeof targetLocationId !== 'string') {
         throw new Error('Некорректный формат ID целевой ячейки');
-      }
-      if (typeof targetWrShk !== 'string') {
-        throw new Error('Некорректный формат штрих-кода целевой ячейки');
       }
       if (typeof prunitId !== 'string') {
         throw new Error('Некорректный формат ID единицы хранения');
@@ -902,9 +874,9 @@ class StorageService {
       }
 
       // Получаем информацию о товаре перед перемещением
-      const sourceInfo = await this.repository.getLocationItems(sourceLocationId);
+      const sourceInfo = await this.repository.getLocationItems(sourceLocationId, id_sklad);
       const sourceItem = sourceInfo.find(item =>
-        item.id === productId && item.prunit_id === prunitId
+        item.article === productId && item.prunit_id === prunitId
       );
 
       if (!sourceItem) {
@@ -916,36 +888,36 @@ class StorageService {
       }
 
       // Проверяем достаточное количество
-      if (sourceItem.product_qnt < quantity) {
+      if (sourceItem.place_qnt < quantity) {
         return {
           success: false,
           errorCode: 400,
-          msg: `Недостаточное количество товара. Доступно: ${sourceItem.product_qnt}, запрошено: ${quantity}`,
-          available: sourceItem.product_qnt
+          msg: `Недостаточное количество товара. Доступно: ${sourceItem.place_qnt}, запрошено: ${quantity}`,
+          available: sourceItem.place_qnt
         };
       }
 
       // Получаем информацию о целевой ячейке
-      const targetInfo = await this.repository.getLocationItems(targetLocationId);
+      const targetInfo = await this.repository.getLocationItems(targetLocationId, id_sklad);
       const targetItem = targetInfo.find(item =>
-        item.id === productId && item.prunit_id === prunitId
+        item.article === productId && item.prunit_id === prunitId
       );
 
-      const targetQuantity = targetItem ? targetItem.product_qnt : 0;
-      const isFullMove = sourceItem.product_qnt === quantity;
+      const targetQuantity = targetItem ? targetItem.place_qnt : 0;
+      const isFullMove = sourceItem.place_qnt === quantity;
 
       // Выполняем перемещение
       const result = await this.repository.moveItemBetweenLocations({
         productId,
         sourceLocationId,
         targetLocationId,
-        targetWrShk,
         prunitId,
         quantity,
         conditionState,
         expirationDate,
         executor,
-        isFullMove
+        isFullMove,
+        id_sklad
       });
 
       if (!result) {
@@ -973,13 +945,12 @@ class StorageService {
           ...result,
           sourceInfo: {
             locationId: sourceLocationId,
-            previousQuantity: sourceItem.product_qnt,
-            remainingQuantity: Math.max(0, sourceItem.product_qnt - quantity),
-            isEmptied: sourceItem.product_qnt <= quantity
+            previousQuantity: sourceItem.place_qnt,
+            remainingQuantity: Math.max(0, sourceItem.place_qnt - quantity),
+            isEmptied: sourceItem.place_qnt <= quantity
           },
           targetInfo: {
-            locationId: targetLocationId,
-            wrShk: targetWrShk,
+            wrShk: targetLocationId,
             previousQuantity: targetQuantity,
             newQuantity: targetQuantity + quantity
           },
@@ -1202,6 +1173,509 @@ class StorageService {
     } catch (error) {
       logger.error('Error in StorageService.getInventoryReport:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Получение детальной информации о ячейке
+   * @param {string} locationId - Штрих-код ячейки
+   * @param {string} id_scklad - ID склада (опционально)
+   * @returns {Promise<Object>} - Детальная информация о ячейке и товарах в ней
+   */
+  async getLocationDetails(locationId, id_scklad) {
+    try {
+      logger.info(`Получение детальной информации о ячейке: ${locationId}${id_scklad ? `, склад: ${id_scklad}` : ''}`);
+
+      if (!locationId) {
+        logger.warn('Не указан штрих-код ячейки');
+        return {
+          success: false,
+          errorCode: 400,
+          msg: 'Необходимо указать штрих-код ячейки'
+        };
+      }
+
+      const locationDetails = await this.repository.getLocationDetails(locationId, id_scklad);
+
+      if (!locationDetails || !locationDetails.locationId) {
+        logger.warn(`Ячейка ${locationId} не найдена или пуста`);
+        return {
+          success: false,
+          errorCode: 404,
+          msg: `Ячейка ${locationId} не найдена или пуста`
+        };
+      }
+
+      return {
+        success: true,
+        data: locationDetails
+      };
+    } catch (error) {
+      logger.error('Ошибка при получении детальной информации о ячейке:', error);
+      return {
+        success: false,
+        errorCode: 500,
+        msg: 'Внутренняя ошибка сервера',
+        error: error.message
+      };
+    }
+  }
+
+  /**
+   * Получение детальной информации о товаре по артикулу
+   * @param {string} article - Артикул товара
+   * @returns {Promise<Object>} - Детальная информация о товаре и его размещении
+   */
+  async getArticleDetails(article) {
+    try {
+      logger.info(`Получение детальной информации о товаре по артикулу: ${article}`);
+
+      if (!article) {
+        logger.warn('Не указан артикул товара');
+        return {
+          success: false,
+          errorCode: 400,
+          msg: 'Необходимо указать артикул товара'
+        };
+      }
+
+      const articleDetails = await this.repository.getArticleDetails(article);
+
+      if (!articleDetails || !articleDetails.totalLocations) {
+        logger.warn(`Товар с артикулом ${article} не найден или отсутствует на складе`);
+        return {
+          success: false,
+          errorCode: 404,
+          msg: `Товар с артикулом ${article} не найден или отсутствует на складе`
+        };
+      }
+
+      return {
+        success: true,
+        data: articleDetails
+      };
+    } catch (error) {
+      logger.error('Ошибка при получении детальной информации о товаре:', error);
+      return {
+        success: false,
+        errorCode: 500,
+        msg: 'Внутренняя ошибка сервера',
+        error: error.message
+      };
+    }
+  }
+
+  /**
+   * Выполнение инвентаризации ячейки
+   * @param {Object} data - Данные инвентаризации
+   * @returns {Promise<Object>} - Результат инвентаризации
+   */
+  async performInventory(data) {
+    try {
+      const { locationId, items, executor, idScklad, updateQuantities = false } = data;
+
+      logger.info(`Выполнение инвентаризации ячейки: ${locationId}${idScklad ? `, склад: ${idScklad}` : ''}`);
+      logger.info(`Исполнитель: ${executor}, Обновлять количества: ${updateQuantities}`);
+
+      if (!locationId) {
+        logger.warn('Не указан штрих-код ячейки');
+        return {
+          success: false,
+          errorCode: 400,
+          msg: 'Необходимо указать штрих-код ячейки'
+        };
+      }
+
+      if (!executor) {
+        logger.warn('Не указан исполнитель');
+        return {
+          success: false,
+          errorCode: 400,
+          msg: 'Необходимо указать исполнителя'
+        };
+      }
+
+      if (!Array.isArray(items)) {
+        logger.warn('Некорректный формат списка товаров');
+        return {
+          success: false,
+          errorCode: 400,
+          msg: 'Список товаров должен быть массивом'
+        };
+      }
+
+      // Проверяем корректность данных о товарах
+      for (const item of items) {
+        if (!item.article || !item.prunitId) {
+          logger.warn('Некорректные данные о товаре:', item);
+          return {
+            success: false,
+            errorCode: 400,
+            msg: 'Для каждого товара необходимо указать артикул и единицу хранения'
+          };
+        }
+
+        if (isNaN(parseFloat(item.quantity)) || parseFloat(item.quantity) < 0) {
+          logger.warn('Некорректное количество товара:', item);
+          return {
+            success: false,
+            errorCode: 400,
+            msg: 'Количество товара должно быть неотрицательным числом'
+          };
+        }
+      }
+
+      // Выполняем инвентаризацию
+      const result = await this.repository.performInventory({
+        locationId,
+        items,
+        executor,
+        idScklad,
+        updateQuantities
+      });
+
+      return {
+        success: true,
+        data: result
+      };
+    } catch (error) {
+      logger.error('Ошибка при выполнении инвентаризации:', error);
+      return {
+        success: false,
+        errorCode: 500,
+        msg: 'Внутренняя ошибка сервера',
+        error: error.message
+      };
+    }
+  }
+
+  /**
+   * Получение истории инвентаризаций
+   * @param {Object} params - Параметры запроса
+   * @returns {Promise<Object>} - История инвентаризаций
+   */
+  async getInventoryHistory(params = {}) {
+    try {
+      logger.info('Получение истории инвентаризаций с параметрами:', JSON.stringify(params));
+
+      // Проверяем корректность дат
+      if (params.startDate && isNaN(Date.parse(params.startDate))) {
+        logger.warn('Некорректный формат начальной даты:', params.startDate);
+        return {
+          success: false,
+          errorCode: 400,
+          msg: 'Некорректный формат начальной даты'
+        };
+      }
+
+      if (params.endDate && isNaN(Date.parse(params.endDate))) {
+        logger.warn('Некорректный формат конечной даты:', params.endDate);
+        return {
+          success: false,
+          errorCode: 400,
+          msg: 'Некорректный формат конечной даты'
+        };
+      }
+
+      // Проверяем корректность статуса
+      const validStatuses = ['match', 'surplus', 'shortage', 'missing', 'not_found'];
+      if (params.status && !validStatuses.includes(params.status)) {
+        logger.warn('Некорректный статус инвентаризации:', params.status);
+        return {
+          success: false,
+          errorCode: 400,
+          msg: `Некорректный статус инвентаризации. Допустимые значения: ${validStatuses.join(', ')}`
+        };
+      }
+
+      // Получаем историю инвентаризаций
+      const history = await this.repository.getInventoryHistory(params);
+
+      // Группируем записи по дате и ячейке для удобства отображения
+      const groupedHistory = {};
+
+      history.forEach(record => {
+        const date = new Date(record.inventory_date).toISOString().split('T')[0];
+        const key = `${date}_${record.location_id}_${record.id_scklad || 'null'}`;
+
+        if (!groupedHistory[key]) {
+          groupedHistory[key] = {
+            date,
+            locationId: record.location_id,
+            idScklad: record.id_scklad,
+            executor: record.executor,
+            items: []
+          };
+        }
+
+        groupedHistory[key].items.push({
+          id: record.id,
+          article: record.article,
+          productName: record.product_name,
+          prunitId: record.prunit_id,
+          prunitName: record.prunit_name,
+          systemQuantity: record.system_quantity,
+          actualQuantity: record.actual_quantity,
+          difference: record.difference,
+          status: record.status,
+          notes: record.notes
+        });
+      });
+
+      return {
+        success: true,
+        data: {
+          records: history,
+          groupedRecords: Object.values(groupedHistory)
+        }
+      };
+    } catch (error) {
+      logger.error('Ошибка при получении истории инвентаризаций:', error);
+      return {
+        success: false,
+        errorCode: 500,
+        msg: 'Внутренняя ошибка сервера',
+        error: error.message
+      };
+    }
+  }
+
+  /**
+   * Получение сводного отчета по инвентаризациям
+   * @param {Object} params - Параметры запроса
+   * @returns {Promise<Object>} - Сводный отчет по инвентаризациям
+   */
+  async getInventorySummary(params = {}) {
+    try {
+      logger.info('Получение сводного отчета по инвентаризациям с параметрами:', JSON.stringify(params));
+
+      // Получаем историю инвентаризаций
+      const history = await this.repository.getInventoryHistory(params);
+
+      // Формируем сводный отчет
+      const summary = {
+        totalInventories: 0,
+        totalLocations: new Set(),
+        totalArticles: new Set(),
+        totalExecutors: new Set(),
+        statusCounts: {
+          match: 0,
+          surplus: 0,
+          shortage: 0,
+          missing: 0,
+          not_found: 0
+        },
+        totalDifference: 0,
+        totalSurplus: 0,
+        totalShortage: 0,
+        byDate: {},
+        byLocation: {},
+        byArticle: {},
+        byExecutor: {}
+      };
+
+      // Группируем записи по дате и ячейке
+      const inventoryGroups = {};
+
+      history.forEach(record => {
+        const date = new Date(record.inventory_date).toISOString().split('T')[0];
+        const key = `${date}_${record.location_id}_${record.id_scklad || 'null'}`;
+
+        if (!inventoryGroups[key]) {
+          inventoryGroups[key] = {
+            date,
+            locationId: record.location_id,
+            idScklad: record.id_scklad,
+            executor: record.executor,
+            items: []
+          };
+
+          // Увеличиваем счетчик инвентаризаций
+          summary.totalInventories++;
+
+          // Добавляем ячейку в множество
+          summary.totalLocations.add(record.location_id);
+
+          // Добавляем исполнителя в множество
+          summary.totalExecutors.add(record.executor);
+
+          // Обновляем статистику по датам
+          if (!summary.byDate[date]) {
+            summary.byDate[date] = {
+              count: 0,
+              locations: new Set(),
+              articles: new Set(),
+              statusCounts: {
+                match: 0,
+                surplus: 0,
+                shortage: 0,
+                missing: 0,
+                not_found: 0
+              }
+            };
+          }
+          summary.byDate[date].count++;
+          summary.byDate[date].locations.add(record.location_id);
+
+          // Обновляем статистику по ячейкам
+          if (!summary.byLocation[record.location_id]) {
+            summary.byLocation[record.location_id] = {
+              count: 0,
+              articles: new Set(),
+              statusCounts: {
+                match: 0,
+                surplus: 0,
+                shortage: 0,
+                missing: 0,
+                not_found: 0
+              }
+            };
+          }
+          summary.byLocation[record.location_id].count++;
+
+          // Обновляем статистику по исполнителям
+          if (!summary.byExecutor[record.executor]) {
+            summary.byExecutor[record.executor] = {
+              count: 0,
+              locations: new Set(),
+              articles: new Set(),
+              statusCounts: {
+                match: 0,
+                surplus: 0,
+                shortage: 0,
+                missing: 0,
+                not_found: 0
+              }
+            };
+          }
+          summary.byExecutor[record.executor].count++;
+          summary.byExecutor[record.executor].locations.add(record.location_id);
+        }
+
+        inventoryGroups[key].items.push({
+          id: record.id,
+          article: record.article,
+          productName: record.product_name,
+          prunitId: record.prunit_id,
+          prunitName: record.prunit_name,
+          systemQuantity: record.system_quantity,
+          actualQuantity: record.actual_quantity,
+          difference: record.difference,
+          status: record.status,
+          notes: record.notes
+        });
+
+        // Добавляем артикул в множество
+        summary.totalArticles.add(record.article);
+
+        // Обновляем счетчики статусов
+        summary.statusCounts[record.status]++;
+
+        // Обновляем общую разницу
+        summary.totalDifference += record.difference;
+        if (record.difference > 0) {
+          summary.totalSurplus += record.difference;
+        } else if (record.difference < 0) {
+          summary.totalShortage += Math.abs(record.difference);
+        }
+
+        // Обновляем статистику по датам
+        summary.byDate[date].articles.add(record.article);
+        summary.byDate[date].statusCounts[record.status]++;
+
+        // Обновляем статистику по ячейкам
+        summary.byLocation[record.location_id].articles.add(record.article);
+        summary.byLocation[record.location_id].statusCounts[record.status]++;
+
+        // Обновляем статистику по артикулам
+        if (!summary.byArticle[record.article]) {
+          summary.byArticle[record.article] = {
+            name: record.product_name,
+            count: 0,
+            locations: new Set(),
+            statusCounts: {
+              match: 0,
+              surplus: 0,
+              shortage: 0,
+              missing: 0,
+              not_found: 0
+            },
+            totalDifference: 0
+          };
+        }
+        summary.byArticle[record.article].count++;
+        summary.byArticle[record.article].locations.add(record.location_id);
+        summary.byArticle[record.article].statusCounts[record.status]++;
+        summary.byArticle[record.article].totalDifference += record.difference;
+
+        // Обновляем статистику по исполнителям
+        summary.byExecutor[record.executor].articles.add(record.article);
+        summary.byExecutor[record.executor].statusCounts[record.status]++;
+      });
+
+      // Преобразуем множества в массивы и подсчитываем размеры
+      summary.totalLocations = Array.from(summary.totalLocations);
+      summary.totalArticles = Array.from(summary.totalArticles);
+      summary.totalExecutors = Array.from(summary.totalExecutors);
+
+      // Преобразуем статистику по датам
+      Object.keys(summary.byDate).forEach(date => {
+        summary.byDate[date].locations = Array.from(summary.byDate[date].locations);
+        summary.byDate[date].articles = Array.from(summary.byDate[date].articles);
+        summary.byDate[date].locationsCount = summary.byDate[date].locations.length;
+        summary.byDate[date].articlesCount = summary.byDate[date].articles.length;
+      });
+
+      // Преобразуем статистику по ячейкам
+      Object.keys(summary.byLocation).forEach(location => {
+        summary.byLocation[location].articles = Array.from(summary.byLocation[location].articles);
+        summary.byLocation[location].articlesCount = summary.byLocation[location].articles.length;
+      });
+
+      // Преобразуем статистику по артикулам
+      Object.keys(summary.byArticle).forEach(article => {
+        summary.byArticle[article].locations = Array.from(summary.byArticle[article].locations);
+        summary.byArticle[article].locationsCount = summary.byArticle[article].locations.length;
+      });
+
+      // Преобразуем статистику по исполнителям
+      Object.keys(summary.byExecutor).forEach(executor => {
+        summary.byExecutor[executor].locations = Array.from(summary.byExecutor[executor].locations);
+        summary.byExecutor[executor].articles = Array.from(summary.byExecutor[executor].articles);
+        summary.byExecutor[executor].locationsCount = summary.byExecutor[executor].locations.length;
+        summary.byExecutor[executor].articlesCount = summary.byExecutor[executor].articles.length;
+      });
+
+      return {
+        success: true,
+        data: {
+          summary: {
+            totalInventories: summary.totalInventories,
+            totalLocationsCount: summary.totalLocations.length,
+            totalArticlesCount: summary.totalArticles.length,
+            totalExecutorsCount: summary.totalExecutors.length,
+            statusCounts: summary.statusCounts,
+            totalDifference: summary.totalDifference,
+            totalSurplus: summary.totalSurplus,
+            totalShortage: summary.totalShortage
+          },
+          details: {
+            byDate: summary.byDate,
+            byLocation: summary.byLocation,
+            byArticle: summary.byArticle,
+            byExecutor: summary.byExecutor
+          },
+          inventories: Object.values(inventoryGroups)
+        }
+      };
+    } catch (error) {
+      logger.error('Ошибка при получении сводного отчета по инвентаризациям:', error);
+      return {
+        success: false,
+        errorCode: 500,
+        msg: 'Внутренняя ошибка сервера',
+        error: error.message
+      };
     }
   }
 }

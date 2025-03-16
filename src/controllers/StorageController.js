@@ -53,15 +53,6 @@ class StorageController {
       logger.info('Получен запрос на получение информации о товаре');
       logger.info('Параметры запроса:', { productId, shk, article, wrShk });
 
-      if (!productId && !shk && !article && !wrShk) {
-        logger.warn('Не указаны параметры поиска (ID товара, ШК, артикул или ШК ячейки)');
-        return res.status(400).json({
-          success: false,
-          errorCode: 400,
-          msg: 'Необходимо указать ID товара, ШК, артикул или ШК ячейки'
-        });
-      }
-
       const result = await storageService.getStorageInfo({ productId, shk, article, wrShk });
 
       if (!result.success) {
@@ -634,22 +625,23 @@ class StorageController {
       const {
         sourceLocationId,
         targetLocationId,
-        targetWrShk,
         prunitId,
         quantity,
         conditionState,
         expirationDate,
-        executor
+        executor,
+        id_sklad
       } = req.body;
 
       logger.info('=== НАЧАЛО ОПЕРАЦИИ ПЕРЕМЕЩЕНИЯ ТОВАРА ===');
       logger.info(`Товар: ${productId}, Единица хранения: ${prunitId}, Количество: ${quantity}`);
-      logger.info(`Откуда: ${sourceLocationId}, Куда: ${targetLocationId} (ШК: ${targetWrShk})`);
+      logger.info(`Откуда: ${sourceLocationId}, Куда: ${targetLocationId} `);
       logger.info(`Исполнитель: ${executor}`);
       if (conditionState) logger.info(`Состояние товара: ${conditionState}`);
       if (expirationDate) logger.info(`Срок годности: ${expirationDate}`);
+      if (id_sklad) logger.info(`ID склада: ${id_sklad}`);
 
-      if (!productId || !sourceLocationId || !targetLocationId || !targetWrShk || !prunitId || !quantity || !executor) {
+      if (!productId || !sourceLocationId || !targetLocationId || !prunitId || !quantity || !executor) {
         logger.warn('Не указаны все обязательные параметры');
         return res.status(400).json({
           success: false,
@@ -693,12 +685,12 @@ class StorageController {
         productId,
         sourceLocationId,
         targetLocationId,
-        targetWrShk,
         prunitId,
         quantity: parsedQuantity,
         conditionState,
         expirationDate,
-        executor
+        executor,
+        id_sklad
       });
 
       if (!result.success) {
@@ -906,6 +898,226 @@ class StorageController {
         success: false,
         message: 'Ошибка при получении отчета по инвентаризациям',
         error: error.message
+      });
+    }
+  }
+
+  /**
+   * Получение детальной информации о ячейке
+   */
+  async getLocationDetails(req, res) {
+    try {
+      const { locationId } = req.params;
+      const { id_scklad, sklad_id } = req.query;
+
+      // Поддерживаем оба варианта параметра (id_scklad и sklad_id)
+      const skladId = id_scklad || sklad_id || null;
+
+      logger.info('Получен запрос на получение детальной информации о ячейке');
+      logger.info('Параметры запроса:', { locationId, skladId });
+
+      if (!locationId) {
+        logger.warn('Не указан штрих-код ячейки');
+        return res.status(400).json({
+          success: false,
+          errorCode: 400,
+          msg: 'Необходимо указать штрих-код ячейки'
+        });
+      }
+
+      const result = await storageService.getLocationDetails(locationId, skladId);
+
+      if (!result.success) {
+        logger.warn('Получение детальной информации о ячейке завершилось неудачей:', result.msg);
+        return res.status(result.errorCode).json(result);
+      }
+
+      logger.info('Детальная информация о ячейке успешно получена');
+      return res.status(200).json(result);
+    } catch (error) {
+      logger.error('Ошибка при получении детальной информации о ячейке:', error);
+      return res.status(500).json({
+        success: false,
+        errorCode: 500,
+        msg: 'Внутренняя ошибка сервера'
+      });
+    }
+  }
+
+  /**
+   * Получение детальной информации о товаре по артикулу
+   */
+  async getArticleDetails(req, res) {
+    try {
+      const { article } = req.params;
+
+      logger.info('Получен запрос на получение детальной информации о товаре');
+      logger.info('Параметры запроса:', { article });
+
+      if (!article) {
+        logger.warn('Не указан артикул товара');
+        return res.status(400).json({
+          success: false,
+          errorCode: 400,
+          msg: 'Необходимо указать артикул товара'
+        });
+      }
+
+      const result = await storageService.getArticleDetails(article);
+
+      if (!result.success) {
+        logger.warn('Получение детальной информации о товаре завершилось неудачей:', result.msg);
+        return res.status(result.errorCode).json(result);
+      }
+
+      logger.info('Детальная информация о товаре успешно получена');
+      return res.status(200).json(result);
+    } catch (error) {
+      logger.error('Ошибка при получении детальной информации о товаре:', error);
+      return res.status(500).json({
+        success: false,
+        errorCode: 500,
+        msg: 'Внутренняя ошибка сервера'
+      });
+    }
+  }
+
+  /**
+   * Выполнение инвентаризации ячейки
+   */
+  async performInventory(req, res) {
+    try {
+      const { locationId } = req.params;
+      const { items, executor, idScklad, updateQuantities } = req.body;
+
+      logger.info('Получен запрос на выполнение инвентаризации ячейки');
+      logger.info('Параметры запроса:', {
+        locationId,
+        executor,
+        idScklad,
+        updateQuantities,
+        itemsCount: items ? items.length : 0
+      });
+
+      if (!locationId) {
+        logger.warn('Не указан штрих-код ячейки');
+        return res.status(400).json({
+          success: false,
+          errorCode: 400,
+          msg: 'Необходимо указать штрих-код ячейки'
+        });
+      }
+
+      if (!executor) {
+        logger.warn('Не указан исполнитель');
+        return res.status(400).json({
+          success: false,
+          errorCode: 400,
+          msg: 'Необходимо указать исполнителя'
+        });
+      }
+
+      if (!Array.isArray(items)) {
+        logger.warn('Некорректный формат списка товаров');
+        return res.status(400).json({
+          success: false,
+          errorCode: 400,
+          msg: 'Список товаров должен быть массивом'
+        });
+      }
+
+      const result = await storageService.performInventory({
+        locationId,
+        items,
+        executor,
+        idScklad,
+        updateQuantities: !!updateQuantities
+      });
+
+      if (!result.success) {
+        logger.warn('Выполнение инвентаризации завершилось неудачей:', result.msg);
+        return res.status(result.errorCode).json(result);
+      }
+
+      logger.info('Инвентаризация успешно выполнена');
+      return res.status(200).json(result);
+    } catch (error) {
+      logger.error('Ошибка при выполнении инвентаризации:', error);
+      return res.status(500).json({
+        success: false,
+        errorCode: 500,
+        msg: 'Внутренняя ошибка сервера'
+      });
+    }
+  }
+
+  /**
+   * Получение истории инвентаризаций
+   */
+  async getInventoryHistory(req, res) {
+    try {
+      const { locationId, article, startDate, endDate, executor, status, limit } = req.query;
+
+      logger.info('Получен запрос на получение истории инвентаризаций');
+      logger.info('Параметры запроса:', { locationId, article, startDate, endDate, executor, status, limit });
+
+      const result = await storageService.getInventoryHistory({
+        locationId,
+        article,
+        startDate,
+        endDate,
+        executor,
+        status,
+        limit: limit ? parseInt(limit) : undefined
+      });
+
+      if (!result.success) {
+        logger.warn('Получение истории инвентаризаций завершилось неудачей:', result.msg);
+        return res.status(result.errorCode).json(result);
+      }
+
+      logger.info('История инвентаризаций успешно получена');
+      return res.status(200).json(result);
+    } catch (error) {
+      logger.error('Ошибка при получении истории инвентаризаций:', error);
+      return res.status(500).json({
+        success: false,
+        errorCode: 500,
+        msg: 'Внутренняя ошибка сервера'
+      });
+    }
+  }
+
+  /**
+   * Получение сводного отчета по инвентаризациям
+   */
+  async getInventorySummary(req, res) {
+    try {
+      const { startDate, endDate, executor, status } = req.query;
+
+      logger.info('Получен запрос на получение сводного отчета по инвентаризациям');
+      logger.info('Параметры запроса:', { startDate, endDate, executor, status });
+
+      const result = await storageService.getInventorySummary({
+        startDate,
+        endDate,
+        executor,
+        status
+      });
+
+      if (!result.success) {
+        logger.warn('Получение сводного отчета по инвентаризациям завершилось неудачей:', result.msg);
+        return res.status(result.errorCode).json(result);
+      }
+
+      logger.info('Сводный отчет по инвентаризациям успешно получен');
+      return res.status(200).json(result);
+    } catch (error) {
+      logger.error('Ошибка при получении сводного отчета по инвентаризациям:', error);
+      return res.status(500).json({
+        success: false,
+        errorCode: 500,
+        msg: 'Внутренняя ошибка сервера'
       });
     }
   }

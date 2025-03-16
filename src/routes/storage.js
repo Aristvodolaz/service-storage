@@ -13,6 +13,13 @@ const { validate } = require('../middlewares/validator');
 
 /**
  * @swagger
+ * tags:
+ *   name: Desktop
+ *   description: Методы API для desktop-приложения
+ */
+
+/**
+ * @swagger
  * /api/storage/search:
  *   get:
  *     summary: Поиск товара по ШК или артикулу
@@ -49,6 +56,7 @@ router.get('/search', [
  * /api/storage/info:
  *   get:
  *     summary: Получение информации о товаре по артикулу, ШК или ШК ячейки
+ *     description: Если параметры не указаны, возвращает все записи из таблицы x_Storage_Full_Info
  *     tags: [Склад]
  *     parameters:
  *       - in: query
@@ -68,11 +76,7 @@ router.get('/search', [
  *         description: Штрих-код ячейки
  *     responses:
  *       200:
- *         description: Информация о товаре
- *       400:
- *         description: Ошибка валидации параметров
- *       404:
- *         description: Товар не найден
+ *         description: Информация о товаре или все записи из таблицы x_Storage_Full_Info, если параметры не указаны
  *       500:
  *         description: Внутренняя ошибка сервера
  */
@@ -190,7 +194,7 @@ router.put('/:productId/quantity', [
  * /api/storage/{productId}/pick:
  *   post:
  *     summary: Снятие товара из ячейки
- *     description: Снимает товар из указанной ячейки. Проверяет наличие товара по артикулу, единице хранения, штрих-коду ячейки и ID склада.
+ *     description: Снимает товар из указанной ячейки. Проверяет наличие товара по артикулу, единице хранения, штрих-коду ячейки и ID склада. Уменьшает только количество в ячейке (place_qnt), не изменяя общее количество товара (product_qnt). При достижении нулевого количества в ячейке запись не удаляется, а сохраняется с нулевым значением place_qnt.
  *     tags: [Склад]
  *     parameters:
  *       - in: path
@@ -256,19 +260,19 @@ router.put('/:productId/quantity', [
  *                   description: Состояние товара
  *                 previousQuantity:
  *                   type: number
- *                   description: Предыдущее количество
+ *                   description: Предыдущее количество в ячейке
  *                 newQuantity:
  *                   type: number
- *                   description: Новое количество
+ *                   description: Новое количество в ячейке
  *                 pickedQuantity:
  *                   type: number
  *                   description: Снятое количество
  *                 isDeleted:
  *                   type: boolean
- *                   description: Флаг удаления записи (если количество стало нулевым)
+ *                   description: Флаг удаления записи (всегда false, так как записи не удаляются)
  *                 productQnt:
  *                   type: number
- *                   description: Общее количество товара
+ *                   description: Общее количество товара (не изменяется при снятии)
  *       400:
  *         description: Ошибка валидации параметров
  *       404:
@@ -291,7 +295,7 @@ router.post('/:productId/pick', [
  * /api/storage/{productId}/buffer:
  *   post:
  *     summary: Добавление товара в буфер
- *     description: Добавляет товар в буфер с учетом артикула, единицы хранения, штрих-кода ячейки и ID склада. Если найдена точно такая же запись - обновляет количество, иначе создает новую запись.
+ *     description: Добавляет товар в буфер с учетом артикула, единицы хранения, штрих-кода ячейки и ID склада. Если найдена запись с таким же артикулом, единицей хранения, штрих-кодом ячейки и ID склада - обновляет количество, иначе создает новую запись с автоматически сгенерированным уникальным ID.
  *     tags: [Склад]
  *     parameters:
  *       - in: path
@@ -449,6 +453,7 @@ router.post('/:productId/buffer/out', [
  * /api/storage/{productId}/buffer/move:
  *   post:
  *     summary: Перемещение товара между буферными ячейками
+ *     description: Перемещает товар между ячейками. Если в целевой ячейке уже есть товар с таким же артикулом, единицей хранения и ID склада, то количества суммируются. Если данные не совпадают, создается новая запись с автоматически сгенерированным ID.
  *     tags: [Склад]
  *     parameters:
  *       - in: path
@@ -497,11 +502,74 @@ router.post('/:productId/buffer/out', [
  *               executor:
  *                 type: string
  *                 description: ID исполнителя
+ *               id_sklad:
+ *                 type: string
+ *                 description: ID склада. Если указан, то перемещение будет выполнено только для товаров с указанным ID склада.
  *     responses:
  *       200:
  *         description: Товар успешно перемещен
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 msg:
+ *                   type: string
+ *                   example: Товар успешно перемещен
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     sourceItem:
+ *                       type: object
+ *                       properties:
+ *                         id:
+ *                           type: string
+ *                         name:
+ *                           type: string
+ *                         article:
+ *                           type: string
+ *                         shk:
+ *                           type: string
+ *                         previousQuantity:
+ *                           type: number
+ *                         newQuantity:
+ *                           type: number
+ *                         prunitId:
+ *                           type: string
+ *                         prunitName:
+ *                           type: string
+ *                     targetItem:
+ *                       type: object
+ *                       properties:
+ *                         id:
+ *                           type: string
+ *                         name:
+ *                           type: string
+ *                         article:
+ *                           type: string
+ *                         shk:
+ *                           type: string
+ *                         previousQuantity:
+ *                           type: number
+ *                         newQuantity:
+ *                           type: number
+ *                         prunitId:
+ *                           type: string
+ *                         prunitName:
+ *                           type: string
+ *                         isNewRecord:
+ *                           type: boolean
+ *                           description: Флаг, указывающий, была ли создана новая запись
+ *                     conditionState:
+ *                       type: string
+ *                     expirationDate:
+ *                       type: string
+ *                       format: date
  *       400:
- *         description: Ошибка валидации параметров или недостаточное количество
+ *         description: Ошибка валидации параметров, недостаточное количество или исходная и целевая ячейки совпадают
  *       404:
  *         description: Товар не найден в указанной ячейке
  *       500:
@@ -511,12 +579,12 @@ router.post('/:productId/buffer/move', [
   param('productId').isString().trim().notEmpty(),
   body('sourceLocationId').isString().trim().notEmpty(),
   body('targetLocationId').isString().trim().notEmpty(),
-  body('targetWrShk').isString().trim().notEmpty(),
   body('prunitId').isString().trim().notEmpty(),
   body('quantity').isFloat({ min: 0.01 }),
   body('executor').isString().trim().notEmpty(),
   body('conditionState').optional().isIn(['кондиция', 'некондиция']),
   body('expirationDate').optional().isISO8601(),
+  body('id_sklad').optional().isString().trim(),
   validate
 ], storageController.moveItemBetweenLocations);
 
@@ -525,7 +593,7 @@ router.post('/:productId/buffer/move', [
  * /api/storage/pick-from-location-by-sklad-id:
  *   post:
  *     summary: Снятие товара из ячейки с учетом поля sklad_id
- *     description: Снимает указанное количество товара из ячейки хранения с учетом идентификатора склада
+ *     description: Снимает указанное количество товара из ячейки хранения с учетом идентификатора склада. Уменьшает только количество в ячейке (place_qnt), не изменяя общее количество товара (product_qnt). При достижении нулевого количества в ячейке запись не удаляется, а сохраняется с нулевым значением place_qnt.
  *     tags: [Склад]
  *     requestBody:
  *       required: true
@@ -598,16 +666,19 @@ router.post('/:productId/buffer/move', [
  *                       description: Состояние товара
  *                     previousQuantity:
  *                       type: number
- *                       description: Предыдущее количество товара
+ *                       description: Предыдущее количество товара в ячейке
  *                     newQuantity:
  *                       type: number
- *                       description: Новое количество товара
+ *                       description: Новое количество товара в ячейке
  *                     pickedQuantity:
  *                       type: number
  *                       description: Снятое количество товара
  *                     isDeleted:
  *                       type: boolean
- *                       description: Флаг удаления записи (если количество стало нулевым)
+ *                       description: Флаг удаления записи (всегда false, так как записи не удаляются)
+ *                     productQnt:
+ *                       type: number
+ *                       description: Общее количество товара (не изменяется при снятии)
  *       400:
  *         description: Ошибка в запросе или недостаточное количество товара
  *       404:
@@ -658,7 +729,7 @@ router.get('/search/article', [
  *   get:
  *     summary: Инвентаризация по ячейке
  *     description: Получение списка товаров в указанной ячейке
- *     tags: [Склад]
+ *     tags: [Склад, Desktop]
  *     parameters:
  *       - in: path
  *         name: locationId
@@ -668,19 +739,17 @@ router.get('/search/article', [
  *         description: ID ячейки
  *       - in: query
  *         name: sklad_id
- *         required: false
  *         schema:
  *           type: string
- *         description: ID склада (опционально). Если указан, то будут возвращены только товары с указанным ID склада в данной ячейке.
+ *         description: ID склада (опционально)
  *       - in: query
  *         name: id_sklad
- *         required: false
  *         schema:
  *           type: string
- *         description: Альтернативное имя для параметра sklad_id. Если указан, то будут возвращены только товары с указанным ID склада в данной ячейке.
+ *         description: ID склада (альтернативное имя параметра, опционально)
  *     responses:
  *       200:
- *         description: Успешное получение списка товаров
+ *         description: Список товаров в ячейке
  *         content:
  *           application/json:
  *             schema:
@@ -733,7 +802,7 @@ router.get('/inventory/location/:locationId', [
  * /api/storage/inventory/article/{article}:
  *   get:
  *     summary: Инвентаризация по артикулу
- *     tags: [Склад]
+ *     tags: [Склад, Desktop]
  *     parameters:
  *       - in: path
  *         name: article
@@ -1247,5 +1316,423 @@ router.get('/location-items/:locationId', [
   query('id_sklad').optional().isString().trim(),
   validate
 ], storageController.getLocationItems);
+
+/**
+ * @swagger
+ * /api/storage/location/{locationId}/details:
+ *   get:
+ *     summary: Получение детальной информации о ячейке
+ *     description: Возвращает подробную информацию о ячейке, включая список товаров, статистику и группировку по артикулам
+ *     tags: [Desktop, Склад]
+ *     parameters:
+ *       - in: path
+ *         name: locationId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Штрих-код ячейки
+ *       - in: query
+ *         name: id_scklad
+ *         required: false
+ *         schema:
+ *           type: string
+ *         description: ID склада (опционально). Если указан, то будут возвращены только товары с указанным ID склада в данной ячейке.
+ *       - in: query
+ *         name: sklad_id
+ *         required: false
+ *         schema:
+ *           type: string
+ *         description: Альтернативное имя для параметра id_scklad.
+ *     responses:
+ *       200:
+ *         description: Успешное получение информации о ячейке
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     locationId:
+ *                       type: string
+ *                       description: Штрих-код ячейки
+ *                     skladId:
+ *                       type: string
+ *                       description: ID склада
+ *                     totalItems:
+ *                       type: integer
+ *                       description: Общее количество товаров в ячейке
+ *                     totalQuantity:
+ *                       type: number
+ *                       description: Общее количество единиц товаров в ячейке
+ *                     uniqueArticles:
+ *                       type: integer
+ *                       description: Количество уникальных артикулов в ячейке
+ *                     items:
+ *                       type: array
+ *                       description: Список товаров в ячейке
+ *                       items:
+ *                         type: object
+ *                     articleGroups:
+ *                       type: array
+ *                       description: Группировка товаров по артикулам
+ *                       items:
+ *                         type: object
+ *       400:
+ *         description: Некорректные параметры запроса
+ *       404:
+ *         description: Ячейка не найдена или пуста
+ *       500:
+ *         description: Внутренняя ошибка сервера
+ */
+router.get('/location/:locationId/details', [
+  param('locationId').isString().trim().notEmpty(),
+  query('id_scklad').optional().isString().trim(),
+  query('sklad_id').optional().isString().trim(),
+  validate
+], storageController.getLocationDetails);
+
+/**
+ * @swagger
+ * /api/storage/article/{article}/details:
+ *   get:
+ *     summary: Получение детальной информации о товаре по артикулу
+ *     description: Возвращает подробную информацию о товаре, включая список ячеек, где он хранится, статистику и группировку по ячейкам и единицам хранения
+ *     tags: [Desktop, Склад]
+ *     parameters:
+ *       - in: path
+ *         name: article
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Артикул товара
+ *     responses:
+ *       200:
+ *         description: Успешное получение информации о товаре
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     article:
+ *                       type: string
+ *                       description: Артикул товара
+ *                     name:
+ *                       type: string
+ *                       description: Наименование товара
+ *                     shk:
+ *                       type: string
+ *                       description: Штрих-код товара
+ *                     totalLocations:
+ *                       type: integer
+ *                       description: Общее количество ячеек, где хранится товар
+ *                     totalQuantity:
+ *                       type: number
+ *                       description: Общее количество единиц товара на складе
+ *                     uniqueUnits:
+ *                       type: integer
+ *                       description: Количество уникальных единиц хранения
+ *                     locations:
+ *                       type: array
+ *                       description: Список ячеек, где хранится товар
+ *                       items:
+ *                         type: object
+ *                     locationGroups:
+ *                       type: array
+ *                       description: Группировка по ячейкам
+ *                       items:
+ *                         type: object
+ *                     unitGroups:
+ *                       type: array
+ *                       description: Группировка по единицам хранения
+ *                       items:
+ *                         type: object
+ *       400:
+ *         description: Некорректные параметры запроса
+ *       404:
+ *         description: Товар не найден или отсутствует на складе
+ *       500:
+ *         description: Внутренняя ошибка сервера
+ */
+router.get('/article/:article/details', [
+  param('article').isString().trim().notEmpty(),
+  validate
+], storageController.getArticleDetails);
+
+/**
+ * @swagger
+ * /api/storage/inventory/{locationId}:
+ *   post:
+ *     summary: Выполнение инвентаризации ячейки
+ *     description: Выполняет инвентаризацию ячейки, сравнивая фактическое наличие товаров с данными в системе
+ *     tags: [Desktop, Склад]
+ *     parameters:
+ *       - in: path
+ *         name: locationId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Штрих-код ячейки
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - items
+ *               - executor
+ *             properties:
+ *               items:
+ *                 type: array
+ *                 description: Список товаров, обнаруженных при инвентаризации
+ *                 items:
+ *                   type: object
+ *                   required:
+ *                     - article
+ *                     - prunitId
+ *                     - quantity
+ *                   properties:
+ *                     article:
+ *                       type: string
+ *                       description: Артикул товара
+ *                     name:
+ *                       type: string
+ *                       description: Наименование товара (опционально, для новых товаров)
+ *                     prunitId:
+ *                       type: string
+ *                       description: ID единицы хранения
+ *                     quantity:
+ *                       type: number
+ *                       description: Фактическое количество товара
+ *                     shk:
+ *                       type: string
+ *                       description: Штрих-код товара (опционально, для новых товаров)
+ *                     conditionState:
+ *                       type: string
+ *                       enum: [кондиция, некондиция]
+ *                       description: Состояние товара (опционально)
+ *                     notes:
+ *                       type: string
+ *                       description: Примечания к товару (опционально)
+ *               executor:
+ *                 type: string
+ *                 description: ID исполнителя инвентаризации
+ *               idScklad:
+ *                 type: string
+ *                 description: ID склада (опционально)
+ *               updateQuantities:
+ *                 type: boolean
+ *                 description: Флаг, указывающий, нужно ли обновлять количества товаров в системе (по умолчанию false)
+ *     responses:
+ *       200:
+ *         description: Инвентаризация успешно выполнена
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     locationId:
+ *                       type: string
+ *                       description: Штрих-код ячейки
+ *                     idScklad:
+ *                       type: string
+ *                       description: ID склада
+ *                     status:
+ *                       type: string
+ *                       enum: [match, discrepancy, completed]
+ *                       description: Статус инвентаризации
+ *                     message:
+ *                       type: string
+ *                       description: Сообщение о результате инвентаризации
+ *                     inventoryResults:
+ *                       type: array
+ *                       description: Результаты инвентаризации по каждому товару
+ *                       items:
+ *                         type: object
+ *       400:
+ *         description: Некорректные параметры запроса
+ *       500:
+ *         description: Внутренняя ошибка сервера
+ */
+router.post('/inventory/:locationId', [
+  param('locationId').isString().trim().notEmpty(),
+  body('items').isArray(),
+  body('executor').isString().trim().notEmpty(),
+  body('idScklad').optional().isString().trim(),
+  body('updateQuantities').optional().isBoolean(),
+  validate
+], storageController.performInventory);
+
+/**
+ * @swagger
+ * /api/storage/inventory/history:
+ *   get:
+ *     summary: Получение истории инвентаризаций
+ *     description: Возвращает историю инвентаризаций с возможностью фильтрации по различным параметрам
+ *     tags: [Desktop, Склад]
+ *     parameters:
+ *       - in: query
+ *         name: locationId
+ *         schema:
+ *           type: string
+ *         description: Штрих-код ячейки для фильтрации
+ *       - in: query
+ *         name: article
+ *         schema:
+ *           type: string
+ *         description: Артикул товара для фильтрации
+ *       - in: query
+ *         name: startDate
+ *         schema:
+ *           type: string
+ *           format: date
+ *         description: Начальная дата для фильтрации (формат YYYY-MM-DD)
+ *       - in: query
+ *         name: endDate
+ *         schema:
+ *           type: string
+ *           format: date
+ *         description: Конечная дата для фильтрации (формат YYYY-MM-DD)
+ *       - in: query
+ *         name: executor
+ *         schema:
+ *           type: string
+ *         description: ID исполнителя для фильтрации
+ *       - in: query
+ *         name: status
+ *         schema:
+ *           type: string
+ *           enum: [match, surplus, shortage, missing, not_found]
+ *         description: Статус инвентаризации для фильтрации
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *         description: Ограничение количества записей
+ *     responses:
+ *       200:
+ *         description: История инвентаризаций успешно получена
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     records:
+ *                       type: array
+ *                       description: Записи истории инвентаризаций
+ *                       items:
+ *                         type: object
+ *                     groupedRecords:
+ *                       type: array
+ *                       description: Записи, сгруппированные по дате и ячейке
+ *                       items:
+ *                         type: object
+ *       400:
+ *         description: Некорректные параметры запроса
+ *       500:
+ *         description: Внутренняя ошибка сервера
+ */
+router.get('/inventory/history', [
+  query('locationId').optional().isString().trim(),
+  query('article').optional().isString().trim(),
+  query('startDate').optional().isString().trim(),
+  query('endDate').optional().isString().trim(),
+  query('executor').optional().isString().trim(),
+  query('status').optional().isString().trim(),
+  query('limit').optional().isInt().toInt(),
+  validate
+], storageController.getInventoryHistory);
+
+/**
+ * @swagger
+ * /api/storage/inventory/summary:
+ *   get:
+ *     summary: Получение сводного отчета по инвентаризациям
+ *     description: Возвращает сводный отчет по инвентаризациям с различными статистическими данными
+ *     tags: [Desktop, Склад]
+ *     parameters:
+ *       - in: query
+ *         name: startDate
+ *         schema:
+ *           type: string
+ *           format: date
+ *         description: Начальная дата для фильтрации (формат YYYY-MM-DD)
+ *       - in: query
+ *         name: endDate
+ *         schema:
+ *           type: string
+ *           format: date
+ *         description: Конечная дата для фильтрации (формат YYYY-MM-DD)
+ *       - in: query
+ *         name: executor
+ *         schema:
+ *           type: string
+ *         description: ID исполнителя для фильтрации
+ *       - in: query
+ *         name: status
+ *         schema:
+ *           type: string
+ *           enum: [match, surplus, shortage, missing, not_found]
+ *         description: Статус инвентаризации для фильтрации
+ *     responses:
+ *       200:
+ *         description: Сводный отчет по инвентаризациям успешно получен
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     summary:
+ *                       type: object
+ *                       description: Общая статистика по инвентаризациям
+ *                     details:
+ *                       type: object
+ *                       description: Детальная статистика по различным параметрам
+ *                     inventories:
+ *                       type: array
+ *                       description: Список инвентаризаций
+ *                       items:
+ *                         type: object
+ *       400:
+ *         description: Некорректные параметры запроса
+ *       500:
+ *         description: Внутренняя ошибка сервера
+ */
+router.get('/inventory/summary', [
+  query('startDate').optional().isString().trim(),
+  query('endDate').optional().isString().trim(),
+  query('executor').optional().isString().trim(),
+  query('status').optional().isString().trim(),
+  validate
+], storageController.getInventorySummary);
 
 module.exports = router;

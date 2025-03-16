@@ -727,7 +727,7 @@ class StorageRepository {
         prunitId: prunitId,
         name: item.Name,
         article: item.Article,
-        shk: item.SHK,
+        shk: item.WR_SHK,
         conditionState: item.Condition_State,
         previousQuantity: currentQuantity,
         newQuantity: newQuantity,
@@ -1043,6 +1043,956 @@ class StorageRepository {
       return insertResult.rowsAffected[0] > 0;
     } catch (error) {
       logger.error('Ошибка при добавлении товара в буфер:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Получение детальной информации о ячейке
+   * @param {string} locationId - Штрих-код ячейки
+   * @param {string} id_scklad - ID склада (опционально)
+   * @returns {Promise<Object>} - Детальная информация о ячейке и товарах в ней
+   */
+  async getLocationDetails(locationId, id_scklad) {
+    try {
+      logger.info(`Получение детальной информации о ячейке: ${locationId}${id_scklad ? `, склад: ${id_scklad}` : ''}`);
+
+      // Получаем информацию о ячейке
+      const locationQuery = `
+        SELECT DISTINCT
+          WR_SHK as locationId,
+          id_scklad as skladId,
+          COUNT(*) OVER() as totalItems,
+          SUM(product_qnt) OVER() as totalQuantity,
+          COUNT(DISTINCT article) OVER() as uniqueArticles
+        FROM [SPOe_rc].[dbo].[x_Storage_Full_Info]
+        WHERE WR_SHK = @locationId
+        ${id_scklad ? 'AND id_scklad = @id_scklad' : ''}
+        AND product_qnt > 0
+      `;
+
+      const locationRequest = this.pool.request()
+        .input('locationId', locationId);
+
+      if (id_scklad) {
+        locationRequest.input('id_scklad', id_scklad);
+      }
+
+      logger.info('SQL запрос для получения информации о ячейке:', locationQuery);
+      const locationResult = await locationRequest.query(locationQuery);
+
+      if (locationResult.recordset.length === 0) {
+        logger.warn(`Ячейка ${locationId} не найдена или пуста`);
+        return {
+          locationId,
+          skladId: id_scklad || null,
+          totalItems: 0,
+          totalQuantity: 0,
+          uniqueArticles: 0,
+          items: []
+        };
+      }
+
+      const locationInfo = locationResult.recordset[0];
+
+      // Получаем список товаров в ячейке
+      const items = await this.getLocationItems(locationId, id_scklad);
+
+      // Группируем товары по артикулу для статистики
+      const articleGroups = {};
+      items.forEach(item => {
+        if (!articleGroups[item.article]) {
+          articleGroups[item.article] = {
+            article: item.article,
+            name: item.name,
+            totalQuantity: 0,
+            units: []
+          };
+        }
+
+        articleGroups[item.article].totalQuantity += parseFloat(item.place_qnt) || 0;
+        articleGroups[item.article].units.push({
+          prunitId: item.prunit_id,
+          prunitName: item.prunit_name,
+          quantity: parseFloat(item.place_qnt) || 0,
+          conditionState: item.condition_state,
+          expirationDate: item.expiration_date
+        });
+      });
+
+      return {
+        locationId: locationInfo.locationId,
+        skladId: locationInfo.skladId,
+        totalItems: locationInfo.totalItems,
+        totalQuantity: locationInfo.totalQuantity,
+        uniqueArticles: locationInfo.uniqueArticles,
+        items: items,
+        articleGroups: Object.values(articleGroups)
+      };
+    } catch (error) {
+      logger.error('Error in getLocationDetails:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Получение детальной информации о товаре по артикулу
+   * @param {string} article - Артикул товара
+   * @returns {Promise<Object>} - Детальная информация о товаре и его размещении
+   */
+  async getArticleDetails(article) {
+    try {
+      logger.info(`Получение детальной информации о товаре по артикулу: ${article}`);
+
+      // Получаем общую информацию о товаре
+      const articleQuery = `
+        SELECT
+          article,
+          name,
+          shk,
+          COUNT(DISTINCT wr_shk) as totalLocations,
+          SUM(product_qnt) as totalQuantity,
+          COUNT(DISTINCT prunit_id) as uniqueUnits
+        FROM [SPOe_rc].[dbo].[x_Storage_Full_Info]
+        WHERE article = @article
+        AND product_qnt > 0
+        GROUP BY article, name, shk
+      `;
+
+      logger.info('SQL запрос для получения информации о товаре:', articleQuery);
+      const articleResult = await this.pool.request()
+        .input('article', article)
+        .query(articleQuery);
+
+      if (articleResult.recordset.length === 0) {
+        logger.warn(`Товар с артикулом ${article} не найден`);
+        return {
+          article,
+          totalLocations: 0,
+          totalQuantity: 0,
+          uniqueUnits: 0,
+          locations: []
+        };
+      }
+
+      const articleInfo = articleResult.recordset[0];
+
+      // Получаем список ячеек, где хранится товар
+      const locations = await this.getArticleLocations(article);
+
+      // Группируем по ячейкам
+      const locationGroups = {};
+      locations.forEach(item => {
+        const locationKey = `${item.wr_shk}_${item.id_scklad || 'null'}`;
+
+        if (!locationGroups[locationKey]) {
+          locationGroups[locationKey] = {
+            locationId: item.wr_shk,
+            skladId: item.id_scklad,
+            totalQuantity: 0,
+            units: []
+          };
+        }
+
+        locationGroups[locationKey].totalQuantity += parseFloat(item.place_qnt) || 0;
+        locationGroups[locationKey].units.push({
+          prunitId: item.prunit_id,
+          prunitName: item.prunit_name,
+          quantity: parseFloat(item.place_qnt) || 0,
+          conditionState: item.condition_state,
+          expirationDate: item.expiration_date
+        });
+      });
+
+      // Группируем по единицам хранения
+      const unitGroups = {};
+      locations.forEach(item => {
+        if (!unitGroups[item.prunit_id]) {
+          unitGroups[item.prunit_id] = {
+            prunitId: item.prunit_id,
+            prunitName: item.prunit_name,
+            totalQuantity: 0,
+            locations: []
+          };
+        }
+
+        unitGroups[item.prunit_id].totalQuantity += parseFloat(item.place_qnt) || 0;
+
+        // Проверяем, есть ли уже такая ячейка в списке
+        const existingLocation = unitGroups[item.prunit_id].locations.find(
+          loc => loc.locationId === item.wr_shk && loc.skladId === item.id_scklad
+        );
+
+        if (existingLocation) {
+          existingLocation.quantity += parseFloat(item.place_qnt) || 0;
+        } else {
+          unitGroups[item.prunit_id].locations.push({
+            locationId: item.wr_shk,
+            skladId: item.id_scklad,
+            quantity: parseFloat(item.place_qnt) || 0,
+            conditionState: item.condition_state
+          });
+        }
+      });
+
+      return {
+        article: articleInfo.article,
+        name: articleInfo.name,
+        shk: articleInfo.shk,
+        totalLocations: articleInfo.totalLocations,
+        totalQuantity: articleInfo.totalQuantity,
+        uniqueUnits: articleInfo.uniqueUnits,
+        locations: locations,
+        locationGroups: Object.values(locationGroups),
+        unitGroups: Object.values(unitGroups)
+      };
+    } catch (error) {
+      logger.error('Error in getArticleDetails:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Создание записи инвентаризации
+   * @param {Object} data - Данные инвентаризации
+   * @returns {Promise<Object>} - Результат создания записи
+   */
+  async createInventoryRecord(data) {
+    try {
+      logger.info('Создание записи инвентаризации:', JSON.stringify(data));
+
+      const query = `
+        INSERT INTO [SPOe_rc].[dbo].[x_Storage_Inventory]
+        (location_id, article, prunit_id, system_quantity, actual_quantity,
+         difference, executor, inventory_date, status, notes, id_scklad)
+        VALUES
+        (@locationId, @article, @prunitId, @systemQuantity, @actualQuantity,
+         @difference, @executor, GETDATE(), @status, @notes, @idScklad)
+      `;
+
+      const result = await this.pool.request()
+        .input('locationId', data.locationId)
+        .input('article', data.article)
+        .input('prunitId', data.prunitId)
+        .input('systemQuantity', data.systemQuantity)
+        .input('actualQuantity', data.actualQuantity)
+        .input('difference', data.difference)
+        .input('executor', data.executor)
+        .input('status', data.status)
+        .input('notes', data.notes || null)
+        .input('idScklad', data.idScklad || null)
+        .query(query);
+
+      logger.info(`Запись инвентаризации создана. Затронуто строк: ${result.rowsAffected[0]}`);
+      return result.rowsAffected[0] > 0;
+    } catch (error) {
+      logger.error('Ошибка при создании записи инвентаризации:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Выполнение инвентаризации ячейки
+   * @param {Object} data - Данные инвентаризации
+   * @returns {Promise<Object>} - Результат инвентаризации
+   */
+  async performInventory(data) {
+    try {
+      const { locationId, items, executor, idScklad, updateQuantities } = data;
+
+      logger.info(`Выполнение инвентаризации ячейки: ${locationId}${idScklad ? `, склад: ${idScklad}` : ''}`);
+      logger.info(`Исполнитель: ${executor}, Обновлять количества: ${updateQuantities}`);
+
+      // Получаем текущие данные о товарах в ячейке
+      const currentItems = await this.getLocationItems(locationId, idScklad);
+
+      if (currentItems.length === 0 && items.length === 0) {
+        logger.info(`Ячейка ${locationId} пуста и в инвентаризации нет товаров`);
+        return {
+          locationId,
+          idScklad,
+          status: 'completed',
+          message: 'Ячейка пуста и в инвентаризации нет товаров',
+          inventoryResults: []
+        };
+      }
+
+      // Создаем словарь текущих товаров для быстрого поиска
+      const currentItemsMap = {};
+      currentItems.forEach(item => {
+        const key = `${item.article}_${item.prunit_id}`;
+        currentItemsMap[key] = item;
+      });
+
+      // Обрабатываем каждый товар из инвентаризации
+      const inventoryResults = [];
+      const updatePromises = [];
+
+      for (const item of items) {
+        const key = `${item.article}_${item.prunitId}`;
+        const currentItem = currentItemsMap[key];
+
+        // Определяем системное количество (0, если товара нет в системе)
+        const systemQuantity = currentItem ? parseFloat(currentItem.place_qnt) || 0 : 0;
+        const actualQuantity = parseFloat(item.quantity) || 0;
+        const difference = actualQuantity - systemQuantity;
+
+        // Определяем статус инвентаризации
+        let status = 'match'; // По умолчанию - совпадение
+        if (difference > 0) {
+          status = 'surplus'; // Излишек
+        } else if (difference < 0) {
+          status = 'shortage'; // Недостача
+        } else if (!currentItem && actualQuantity === 0) {
+          status = 'not_found'; // Товар не найден в системе и не обнаружен при инвентаризации
+        }
+
+        // Создаем запись инвентаризации
+        const inventoryRecord = {
+          locationId,
+          article: item.article,
+          prunitId: item.prunitId,
+          systemQuantity,
+          actualQuantity,
+          difference,
+          executor,
+          status,
+          notes: item.notes,
+          idScklad
+        };
+
+        // Добавляем запись в результаты
+        inventoryResults.push({
+          article: item.article,
+          name: currentItem ? currentItem.name : item.name || 'Неизвестный товар',
+          prunitId: item.prunitId,
+          prunitName: currentItem ? currentItem.prunit_name : this.getPrunitTypeText(item.prunitId).name,
+          systemQuantity,
+          actualQuantity,
+          difference,
+          status,
+          notes: item.notes
+        });
+
+        // Создаем запись в таблице инвентаризации
+        await this.createInventoryRecord(inventoryRecord);
+
+        // Если нужно обновить количества и есть расхождения
+        if (updateQuantities && difference !== 0) {
+          if (currentItem) {
+            // Товар существует - обновляем количество
+            if (actualQuantity > 0) {
+              // Обновляем количество
+              const updateQuery = `
+                UPDATE [SPOe_rc].[dbo].[x_Storage_Full_Info]
+                SET Place_QNT = @actualQuantity,
+                    Update_Date = GETDATE(),
+                    Executor = @executor
+                WHERE article = @article
+                AND Prunit_Id = @prunitId
+                AND WR_SHK = @locationId
+                AND (@idScklad IS NULL AND id_scklad IS NULL OR id_scklad = @idScklad)
+              `;
+
+              updatePromises.push(
+                this.pool.request()
+                  .input('article', item.article)
+                  .input('prunitId', item.prunitId)
+                  .input('locationId', locationId)
+                  .input('actualQuantity', actualQuantity)
+                  .input('executor', executor)
+                  .input('idScklad', idScklad || null)
+                  .query(updateQuery)
+              );
+
+              // Логируем операцию
+              await this.logStorageOperation({
+                operationType: 'инвентаризация',
+                productId: item.article,
+                prunitId: item.prunitId,
+                fromLocationId: locationId,
+                toLocationId: null,
+                quantity: difference,
+                conditionState: currentItem.condition_state || 'кондиция',
+                executor
+              });
+            } else {
+              // Если фактическое количество 0, устанавливаем place_qnt = 0
+              const updateQuery = `
+                UPDATE [SPOe_rc].[dbo].[x_Storage_Full_Info]
+                SET Place_QNT = 0,
+                    Update_Date = GETDATE(),
+                    Executor = @executor
+                WHERE article = @article
+                AND Prunit_Id = @prunitId
+                AND WR_SHK = @locationId
+                AND (@idScklad IS NULL AND id_scklad IS NULL OR id_scklad = @idScklad)
+              `;
+
+              updatePromises.push(
+                this.pool.request()
+                  .input('article', item.article)
+                  .input('prunitId', item.prunitId)
+                  .input('locationId', locationId)
+                  .input('executor', executor)
+                  .input('idScklad', idScklad || null)
+                  .query(updateQuery)
+              );
+
+              // Логируем операцию
+              await this.logStorageOperation({
+                operationType: 'инвентаризация',
+                productId: item.article,
+                prunitId: item.prunitId,
+                fromLocationId: locationId,
+                toLocationId: null,
+                quantity: -systemQuantity,
+                conditionState: currentItem.condition_state || 'кондиция',
+                executor
+              });
+            }
+          } else if (actualQuantity > 0) {
+            // Товар не существует, но обнаружен при инвентаризации - создаем новую запись
+            // Получаем максимальный ID из таблицы
+            const getMaxIdQuery = `
+              SELECT MAX(CAST(ID as INT)) as maxId
+              FROM [SPOe_rc].[dbo].[x_Storage_Full_Info]
+            `;
+
+            const maxIdResult = await this.pool.request().query(getMaxIdQuery);
+            const maxId = maxIdResult.recordset[0].maxId || 0;
+            const newId = (maxId + 1).toString();
+
+            // Определяем prunit_name из справочника
+            const prunitInfo = this.prunitTypes[item.prunitId] || this.prunitTypes[0];
+            const prunitName = prunitInfo.name;
+
+            const insertQuery = `
+              INSERT INTO [SPOe_rc].[dbo].[x_Storage_Full_Info]
+              (ID, Name, Article, SHK, Product_QNT, Place_QNT, Prunit_Name, Prunit_Id,
+               WR_SHK, id_scklad, Condition_State, Executor, Create_Date)
+              VALUES
+              (@newId, @name, @article, @shk, @quantity, @quantity, @prunitName, @prunitId,
+               @wrShk, @idScklad, @conditionState, @executor, GETDATE())
+            `;
+
+            updatePromises.push(
+              this.pool.request()
+                .input('newId', newId)
+                .input('name', item.name || 'Добавлено при инвентаризации')
+                .input('article', item.article)
+                .input('shk', item.shk || '')
+                .input('quantity', quantity)
+                .input('prunitName', prunitName)
+                .input('prunitId', item.prunitId)
+                .input('wrShk', locationId)
+                .input('idScklad', idScklad || null)
+                .input('conditionState', item.conditionState || 'кондиция')
+                .input('executor', executor)
+                .query(insertQuery)
+            );
+
+            // Логируем операцию
+            await this.logStorageOperation({
+              operationType: 'инвентаризация_добавление',
+              productId: item.article,
+              prunitId: item.prunitId,
+              fromLocationId: null,
+              toLocationId: locationId,
+              quantity: quantity,
+              conditionState: item.conditionState || 'кондиция',
+              executor
+            });
+          }
+        }
+      }
+
+      // Проверяем товары, которые есть в системе, но не указаны в инвентаризации
+      for (const currentItem of currentItems) {
+        const key = `${currentItem.article}_${currentItem.prunit_id}`;
+        const found = items.some(item => `${item.article}_${item.prunitId}` === key);
+
+        if (!found) {
+          // Товар есть в системе, но не указан в инвентаризации
+          const systemQuantity = parseFloat(currentItem.place_qnt) || 0;
+
+          // Создаем запись инвентаризации
+          const inventoryRecord = {
+            locationId,
+            article: currentItem.article,
+            prunitId: currentItem.prunit_id,
+            systemQuantity,
+            actualQuantity: 0, // Предполагаем, что товара нет, так как он не указан
+            difference: -systemQuantity,
+            executor,
+            status: 'missing', // Товар не указан в инвентаризации
+            notes: 'Товар не указан при инвентаризации',
+            idScklad
+          };
+
+          // Добавляем запись в результаты
+          inventoryResults.push({
+            article: currentItem.article,
+            name: currentItem.name,
+            prunitId: currentItem.prunit_id,
+            prunitName: currentItem.prunit_name,
+            systemQuantity,
+            actualQuantity: 0,
+            difference: -systemQuantity,
+            status: 'missing',
+            notes: 'Товар не указан при инвентаризации'
+          });
+
+          // Создаем запись в таблице инвентаризации
+          await this.createInventoryRecord(inventoryRecord);
+
+          // Если нужно обновить количества
+          if (updateQuantities) {
+            // Устанавливаем place_qnt = 0
+            const updateQuery = `
+              UPDATE [SPOe_rc].[dbo].[x_Storage_Full_Info]
+              SET Place_QNT = 0,
+                  Update_Date = GETDATE(),
+                  Executor = @executor
+              WHERE article = @article
+              AND Prunit_Id = @prunitId
+              AND WR_SHK = @locationId
+              AND (@idScklad IS NULL AND id_scklad IS NULL OR id_scklad = @idScklad)
+            `;
+
+            updatePromises.push(
+              this.pool.request()
+                .input('article', currentItem.article)
+                .input('prunitId', currentItem.prunit_id)
+                .input('locationId', locationId)
+                .input('executor', executor)
+                .input('idScklad', idScklad || null)
+                .query(updateQuery)
+            );
+
+            // Логируем операцию
+            await this.logStorageOperation({
+              operationType: 'инвентаризация',
+              productId: currentItem.article,
+              prunitId: currentItem.prunit_id,
+              fromLocationId: locationId,
+              toLocationId: null,
+              quantity: -systemQuantity,
+              conditionState: currentItem.condition_state || 'кондиция',
+              executor
+            });
+          }
+        }
+      }
+
+      // Выполняем все обновления
+      if (updatePromises.length > 0) {
+        await Promise.all(updatePromises);
+      }
+
+      // Определяем общий статус инвентаризации
+      let overallStatus = 'match';
+      if (inventoryResults.some(r => r.status === 'surplus' || r.status === 'shortage' || r.status === 'missing')) {
+        overallStatus = 'discrepancy';
+      }
+
+      return {
+        locationId,
+        idScklad,
+        status: overallStatus,
+        message: overallStatus === 'match' ? 'Инвентаризация завершена без расхождений' : 'Инвентаризация завершена с расхождениями',
+        inventoryResults
+      };
+    } catch (error) {
+      logger.error('Ошибка при выполнении инвентаризации:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Получение истории инвентаризаций
+   * @param {Object} params - Параметры запроса
+   * @returns {Promise<Array>} - История инвентаризаций
+   */
+  async getInventoryHistory(params = {}) {
+    try {
+      const { locationId, article, startDate, endDate, executor, status, limit } = params;
+
+      logger.info('Получение истории инвентаризаций с параметрами:', JSON.stringify(params));
+
+      let query = `
+        SELECT
+          i.id,
+          i.location_id,
+          i.article,
+          i.prunit_id,
+          i.system_quantity,
+          i.actual_quantity,
+          i.difference,
+          i.executor,
+          i.inventory_date,
+          i.status,
+          i.notes,
+          i.id_scklad,
+          p.name as product_name,
+          p.prunit_name
+        FROM [SPOe_rc].[dbo].[x_Storage_Inventory] i
+        LEFT JOIN [SPOe_rc].[dbo].[x_Storage_Full_Info] p
+          ON i.article = p.article AND i.prunit_id = p.prunit_id
+        WHERE 1=1
+      `;
+
+      const request = this.pool.request();
+
+      // Добавляем фильтры
+      if (locationId) {
+        query += ` AND i.location_id = @locationId`;
+        request.input('locationId', locationId);
+      }
+
+      if (article) {
+        query += ` AND i.article = @article`;
+        request.input('article', article);
+      }
+
+      if (startDate) {
+        query += ` AND i.inventory_date >= @startDate`;
+        request.input('startDate', new Date(startDate));
+      }
+
+      if (endDate) {
+        query += ` AND i.inventory_date <= @endDate`;
+        request.input('endDate', new Date(endDate));
+      }
+
+      if (executor) {
+        query += ` AND i.executor = @executor`;
+        request.input('executor', executor);
+      }
+
+      if (status) {
+        query += ` AND i.status = @status`;
+        request.input('status', status);
+      }
+
+      // Сортировка по дате (сначала новые)
+      query += ` ORDER BY i.inventory_date DESC`;
+
+      // Ограничение количества записей
+      if (limit) {
+        query += ` OFFSET 0 ROWS FETCH NEXT @limit ROWS ONLY`;
+        request.input('limit', limit);
+      }
+
+      logger.info('SQL запрос для получения истории инвентаризаций:', query);
+      const result = await request.query(query);
+      logger.info(`Получено записей: ${result.recordset.length}`);
+
+      return result.recordset;
+    } catch (error) {
+      logger.error('Ошибка при получении истории инвентаризаций:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Перемещение товара между ячейками
+   * @param {Object} params - Параметры перемещения
+   * @returns {Promise<Object>} - Результат перемещения
+   */
+  async moveItemBetweenLocations(params) {
+    try {
+      logger.info('Начало выполнения moveItemBetweenLocations');
+      logger.info('Параметры:', JSON.stringify(params));
+
+      const {
+        productId,
+        sourceLocationId,
+        targetLocationId,
+        prunitId,
+        quantity,
+        conditionState,
+        expirationDate,
+        executor,
+        isFullMove,
+        id_sklad
+      } = params;
+
+      // Проверяем, что исходная и целевая ячейки не совпадают
+      if (sourceLocationId === targetLocationId) {
+        logger.warn(`Исходная и целевая ячейки совпадают: ${sourceLocationId}`);
+        return {
+          error: 'same_location',
+          msg: 'Исходная и целевая ячейки не могут совпадать'
+        };
+      }
+
+      // Получаем информацию о товаре в исходной ячейке
+      let sourceQuery = `
+        SELECT * FROM [SPOe_rc].[dbo].[x_Storage_Full_Info]
+        WHERE Article = @productId
+        AND Prunit_Id = @prunitId
+        AND WR_SHK = @sourceLocationId
+      `;
+
+      // Добавляем условие по id_sklad, если оно указано
+      if (id_sklad) {
+        sourceQuery += ` AND id_scklad = @id_sklad`;
+      }
+
+      const sourceRequest = this.pool.request()
+        .input('productId', productId)
+        .input('prunitId', prunitId)
+        .input('sourceLocationId', sourceLocationId);
+
+      if (id_sklad) {
+        sourceRequest.input('id_sklad', id_sklad);
+      }
+
+      const sourceResult = await sourceRequest.query(sourceQuery);
+
+      if (sourceResult.recordset.length === 0) {
+        logger.warn(`Товар с артикулом ${productId} и единицей хранения ${prunitId} не найден в ячейке ${sourceLocationId}${id_sklad ? ` с id_sklad=${id_sklad}` : ''}`);
+        return {
+          error: 'not_found',
+          msg: 'Товар не найден в исходной ячейке'
+        };
+      }
+
+      const sourceItem = sourceResult.recordset[0];
+      const sourceQuantity = parseFloat(sourceItem.Place_QNT) || 0;
+
+      if (sourceQuantity < quantity) {
+        logger.warn(`Недостаточное количество товара. Доступно: ${sourceQuantity}, запрошено: ${quantity}`);
+        return {
+          error: 'insufficient_quantity',
+          available: sourceQuantity,
+          msg: `Недостаточное количество товара. Доступно: ${sourceQuantity}, запрошено: ${quantity}`
+        };
+      }
+
+      // Проверяем, есть ли товар с такими же параметрами в целевой ячейке
+      const targetQuery = `
+        SELECT * FROM [SPOe_rc].[dbo].[x_Storage_Full_Info]
+        WHERE Article = @productId
+        AND Prunit_Id = @prunitId
+        AND WR_SHK = @targetLocationId
+        AND ((@idScklad IS NULL AND id_scklad IS NULL) OR id_scklad = @idScklad)
+      `;
+
+      const targetResult = await this.pool.request()
+        .input('productId', productId)
+        .input('prunitId', prunitId)
+        .input('targetLocationId', targetLocationId)
+        .input('idScklad', id_sklad || sourceItem.id_scklad)
+        .query(targetQuery);
+
+      // Начинаем транзакцию
+      const transaction = new sql.Transaction(this.pool);
+      await transaction.begin();
+
+      try {
+        // Обновляем количество в исходной ячейке
+        const newSourceQuantity = sourceQuantity - quantity;
+        const updateSourceQuery = `
+          UPDATE [SPOe_rc].[dbo].[x_Storage_Full_Info]
+          SET Place_QNT = @newQuantity,
+              Update_Date = GETDATE(),
+              Executor = @executor
+          WHERE ID = @id
+        `;
+
+        await new sql.Request(transaction)
+          .input('newQuantity', newSourceQuantity)
+          .input('executor', executor)
+          .input('id', sourceItem.ID)
+          .query(updateSourceQuery);
+
+        // Логируем операцию снятия из исходной ячейки
+        await this.logStorageOperationWithTransaction(transaction, {
+          operationType: 'перемещение_из',
+          productId: productId,
+          prunitId: prunitId,
+          fromLocationId: sourceLocationId,
+          toLocationId: targetLocationId,
+          quantity: -quantity,
+          conditionState: sourceItem.Condition_State || 'кондиция',
+          executor: executor
+        });
+
+        let targetItem;
+        let isNewRecord = false;
+
+        if (targetResult.recordset.length > 0) {
+          // Товар с такими параметрами уже есть в целевой ячейке - обновляем количество
+          targetItem = targetResult.recordset[0];
+          const targetQuantity = parseFloat(targetItem.Place_QNT) || 0;
+          const newTargetQuantity = targetQuantity + quantity;
+
+          const updateTargetQuery = `
+            UPDATE [SPOe_rc].[dbo].[x_Storage_Full_Info]
+            SET Place_QNT = @newQuantity,
+                Product_QNT = @productQnt,
+                Update_Date = GETDATE(),
+                Executor = @executor
+            WHERE ID = @id
+          `;
+
+          await new sql.Request(transaction)
+            .input('newQuantity', newTargetQuantity)
+            .input('productQnt', parseFloat(targetItem.Product_QNT) + quantity)
+            .input('executor', executor)
+            .input('id', targetItem.ID)
+            .query(updateTargetQuery);
+
+          logger.info(`Обновлено количество товара в целевой ячейке. ID: ${targetItem.ID}, Новое количество: ${newTargetQuantity}`);
+        } else {
+          // Товара с такими параметрами нет в целевой ячейке - создаем новую запись
+          isNewRecord = true;
+
+          // Получаем максимальный ID из таблицы
+          const getMaxIdQuery = `
+            SELECT MAX(CAST(ID as INT)) as maxId
+            FROM [SPOe_rc].[dbo].[x_Storage_Full_Info]
+          `;
+
+          const maxIdResult = await new sql.Request(transaction).query(getMaxIdQuery);
+          const maxId = maxIdResult.recordset[0].maxId || 0;
+          const newId = (maxId + 1).toString();
+
+          const insertTargetQuery = `
+            INSERT INTO [SPOe_rc].[dbo].[x_Storage_Full_Info]
+            (ID, Name, Article, SHK, Product_QNT, Place_QNT, Prunit_Name, Prunit_Id,
+             WR_SHK, id_scklad, Condition_State, Expiration_Date, Executor, Create_Date)
+            VALUES
+            (@newId, @name, @article, @shk, @quantity, @quantity, @prunitName, @prunitId,
+             @wrShk, @idScklad, @conditionState, @expirationDate, @executor, GETDATE())
+          `;
+
+          await new sql.Request(transaction)
+            .input('newId', newId)
+            .input('name', sourceItem.Name)
+            .input('article', productId)
+            .input('shk', sourceItem.SHK)
+            .input('quantity', quantity)
+            .input('prunitName', sourceItem.Prunit_Name)
+            .input('prunitId', prunitId)
+            .input('wrShk', targetLocationId)
+            .input('idScklad', id_sklad || sourceItem.id_scklad)
+            .input('conditionState', conditionState || sourceItem.Condition_State || 'кондиция')
+            .input('expirationDate', expirationDate ? new Date(expirationDate) : sourceItem.Expiration_Date)
+            .input('executor', executor)
+            .query(insertTargetQuery);
+
+          targetItem = {
+            ID: newId,
+            Name: sourceItem.Name,
+            Article: productId,
+            SHK: sourceItem.SHK,
+            Product_QNT: quantity,
+            Place_QNT: quantity,
+            Prunit_Name: sourceItem.Prunit_Name,
+            Prunit_Id: prunitId,
+            WR_SHK: targetLocationId,
+            id_scklad: id_sklad || sourceItem.id_scklad,
+            Condition_State: conditionState || sourceItem.Condition_State || 'кондиция',
+            Expiration_Date: expirationDate ? new Date(expirationDate) : sourceItem.Expiration_Date
+          };
+
+          logger.info(`Создана новая запись в целевой ячейке. ID: ${newId}, Количество: ${quantity}`);
+        }
+
+        // Логируем операцию добавления в целевую ячейку
+        await this.logStorageOperationWithTransaction(transaction, {
+          operationType: 'перемещение_в',
+          productId: productId,
+          prunitId: prunitId,
+          fromLocationId: sourceLocationId,
+          toLocationId: targetLocationId,
+          quantity: quantity,
+          conditionState: targetItem.Condition_State || 'кондиция',
+          executor: executor
+        });
+
+        // Завершаем транзакцию
+        await transaction.commit();
+
+        logger.info('Перемещение товара успешно выполнено');
+        return {
+          success: true,
+          sourceItem: {
+            id: sourceItem.ID,
+            name: sourceItem.Name,
+            article: sourceItem.Article,
+            shk: sourceItem.SHK,
+            previousQuantity: sourceQuantity,
+            newQuantity: newSourceQuantity,
+            prunitId: sourceItem.Prunit_Id,
+            prunitName: sourceItem.Prunit_Name
+          },
+          targetItem: {
+            id: targetItem.ID,
+            name: targetItem.Name,
+            article: targetItem.Article,
+            shk: targetItem.SHK,
+            previousQuantity: isNewRecord ? 0 : parseFloat(targetItem.Place_QNT) || 0,
+            newQuantity: isNewRecord ? quantity : (parseFloat(targetItem.Place_QNT) || 0) + quantity,
+            prunitId: targetItem.Prunit_Id,
+            prunitName: targetItem.Prunit_Name,
+            isNewRecord
+          },
+          conditionState: targetItem.Condition_State,
+          expirationDate: targetItem.Expiration_Date
+        };
+      } catch (error) {
+        // В случае ошибки откатываем транзакцию
+        await transaction.rollback();
+        logger.error('Ошибка при перемещении товара:', error);
+        throw error;
+      }
+    } catch (error) {
+      logger.error('Ошибка в moveItemBetweenLocations:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Логирование операции со складом в рамках транзакции
+   */
+  async logStorageOperationWithTransaction(transaction, data) {
+    try {
+      const {
+        operationType,
+        productId,
+        prunitId,
+        fromLocationId,
+        toLocationId,
+        quantity,
+        conditionState,
+        executor
+      } = data;
+
+      const query = `
+        INSERT INTO [SPOe_rc].[dbo].[x_Storage_Operations_Log]
+        (operation_type, product_id, prunit_id, from_location_id, to_location_id, quantity, condition_state, executor, operation_date)
+        VALUES
+        (@operationType, @productId, @prunitId, @fromLocationId, @toLocationId, @quantity, @conditionState, @executor, GETDATE())
+      `;
+
+      await new sql.Request(transaction)
+        .input('operationType', operationType)
+        .input('productId', productId)
+        .input('prunitId', prunitId)
+        .input('fromLocationId', fromLocationId)
+        .input('toLocationId', toLocationId)
+        .input('quantity', quantity)
+        .input('conditionState', conditionState)
+        .input('executor', executor)
+        .query(query);
+
+      return true;
+    } catch (error) {
+      logger.error('Ошибка при логировании операции со складом:', error);
       throw error;
     }
   }

@@ -24,6 +24,16 @@ const options = {
         description: 'Продакшн сервер'
       }
     ],
+    tags: [
+      {
+        name: 'Склад',
+        description: 'Операции со складскими данными'
+      },
+      {
+        name: 'Desktop',
+        description: 'Методы для desktop-приложения'
+      }
+    ],
     components: {
       schemas: {
         Error: {
