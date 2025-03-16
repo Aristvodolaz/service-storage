@@ -317,7 +317,6 @@ class StorageService {
       if (typeof productId !== 'string') {
         throw new Error('Некорректный формат ID товара');
       }
-
       if (typeof quantity !== 'number' || quantity <= 0) {
         throw new Error('Некорректное количество');
       }
@@ -334,103 +333,40 @@ class StorageService {
         throw new Error('Некорректный формат срока годности');
       }
 
-      // Используем переданный штрих-код напрямую
-      logger.info(`Используем штрих-код места хранения: ${wrShk}`);
+      // Добавляем товар в буфер
+      const result = await this.repository.addToBuffer({
+        productId,
+        prunitId,
+        quantity,
+        executor,
+        wrShk,
+        conditionState: conditionState || 'кондиция',
+        expirationDate,
+        name,
+        article,
+        shk,
+        sklad_id
+      });
 
-      // Создаем объект местоположения
-      const location = {
-        locationId: wrShk,
-        isBuffer: true
-      };
-
-      logger.info(`Создано местоположение: ${JSON.stringify(location)}`);
-
-      const locationId = location.locationId;
-
-      // Проверяем, есть ли уже товар в указанной ячейке
-      const existingItem = await this.repository.checkBufferItem(productId, prunitId, locationId);
-
-      let result;
-
-      if (existingItem) {
-        // Товар уже есть в ячейке, обновляем количество
-        const currentQuantity = parseFloat(existingItem.quantity) || 0;
-        const numericQuantity = parseFloat(quantity) || 0;
-        const newQuantity = currentQuantity + numericQuantity;
-
-        // Обновляем запись
-        result = await this.repository.updateBufferQuantity({
-          productId,
-          prunitId,
-          locationId,
-          quantity: newQuantity,
-          conditionState: conditionState || existingItem.conditionState || 'кондиция',
-          expirationDate: expirationDate || existingItem.expirationDate,
-          wrShk,
-          executor,
-          name,
-          article,
-          shk,
-          sklad_id
-        });
-
-        if (!result) {
-          return {
-            success: false,
-            errorCode: 400,
-            msg: 'Не удалось обновить количество товара в буфере'
-          };
-        }
-
+      if (!result) {
         return {
-          success: true,
-          msg: 'Количество товара в буфере успешно обновлено',
-          data: {
-            previousQuantity: existingItem.quantity,
-            newQuantity: newQuantity,
-            locationId,
-            wrShk,
-            conditionState: conditionState || existingItem.conditionState || 'кондиция',
-            expirationDate: expirationDate || existingItem.expirationDate
-          }
-        };
-      } else {
-        // Товара нет в ячейке, создаем новую запись
-        result = await this.repository.addToBuffer({
-          productId,
-          prunitId,
-          locationId,
-          quantity,
-          conditionState: conditionState || 'кондиция',
-          expirationDate: expirationDate || null,
-          wrShk,
-          executor,
-          name,
-          article,
-          shk,
-          sklad_id
-        });
-
-        if (!result) {
-          return {
-            success: false,
-            errorCode: 400,
-            msg: 'Не удалось разместить товар в буфер'
-          };
-        }
-
-        return {
-          success: true,
-          msg: 'Товар успешно размещен в буфер',
-          data: {
-            quantity,
-            locationId,
-            wrShk,
-            conditionState: conditionState || 'кондиция',
-            expirationDate
-          }
+          success: false,
+          errorCode: 400,
+          msg: 'Не удалось разместить товар в буфер'
         };
       }
+
+      return {
+        success: true,
+        msg: 'Товар успешно размещен в буфер',
+        data: {
+          quantity,
+          locationId: wrShk,
+          wrShk,
+          conditionState: conditionState || 'кондиция',
+          expirationDate
+        }
+      };
     } catch (error) {
       logger.error('Ошибка при размещении товара в буфер:', error);
       return {

@@ -328,7 +328,7 @@ class StorageRepository {
 
       const query = `
         SELECT
-          ID as productId,
+          article as productId,
           Prunit_Id as prunitId,
           id_scklad as locationId,
           Product_QNT as quantity,
@@ -336,7 +336,7 @@ class StorageRepository {
           Expiration_Date as expirationDate,
           WR_SHK as wrShk
         FROM [SPOe_rc].[dbo].[x_Storage_Full_Info]
-        WHERE ID = @productId
+        WHERE article = @productId
           AND WR_SHK IS NOT NULL
         ORDER BY Expiration_Date DESC
       `;
@@ -406,7 +406,7 @@ class StorageRepository {
           id_scklad,
           WR_SHK
         FROM [SPOe_rc].[dbo].[x_Storage_Full_Info]
-        WHERE ID = @productId
+        WHERE article = @productId
         AND Prunit_Id = @prunitId
         AND WR_SHK = @wrShk
         AND id_scklad = @idScklad
@@ -481,25 +481,17 @@ class StorageRepository {
           condition_state
         FROM [SPOe_rc].[dbo].[x_Storage_Full_Info]
         WHERE article = @productId
-        AND prunit_id = @prunitId`;
-
-      // Если указан sklad_id, используем его, иначе используем locationId
-      if (sklad_id) {
-        query += ` AND id_scklad = @sklad_id`;
-      } else {
-        query += ` AND wr_shk = @locationId`;
-      }
+        AND prunit_id = @prunitId
+        AND wr_shk = @locationId
+        AND (@sklad_id IS NULL AND id_scklad IS NULL OR id_scklad = @sklad_id)`;
 
       logger.info('SQL запрос для проверки наличия товара:', query);
 
       const request = this.pool.request()
         .input('productId', productId)
         .input('prunitId', prunitId)
-        .input('locationId', locationId);
-
-      if (sklad_id) {
-        request.input('sklad_id', sklad_id);
-      }
+        .input('locationId', locationId)
+        .input('sklad_id', sklad_id || null);
 
       const result = await request.query(query);
 
@@ -530,16 +522,10 @@ class StorageRepository {
           SET Place_QNT = 0,
               Update_Date = GETDATE(),
               Executor = @executor
-          WHERE ID = @productId
+          WHERE article = @productId
           AND Prunit_Id = @prunitId
-        `;
-
-        // Если указан sklad_id, используем его, иначе используем locationId
-        if (sklad_id) {
-          updateQuery += ` AND id_scklad = @sklad_id`;
-        } else {
-          updateQuery += ` AND wr_shk = @locationId`;
-        }
+          AND wr_shk = @locationId
+          AND (@sklad_id IS NULL AND id_scklad IS NULL OR id_scklad = @sklad_id)`;
 
         logger.info('SQL запрос для обнуления количества:', updateQuery);
 
@@ -547,11 +533,8 @@ class StorageRepository {
           .input('productId', productId)
           .input('prunitId', prunitId)
           .input('locationId', locationId)
-          .input('executor', executor);
-
-        if (sklad_id) {
-          updateRequest.input('sklad_id', sklad_id);
-        }
+          .input('executor', executor)
+          .input('sklad_id', sklad_id || null);
 
         await updateRequest.query(updateQuery);
       } else {
@@ -562,16 +545,10 @@ class StorageRepository {
           SET Place_QNT = @newQuantity,
               Update_Date = GETDATE(),
               Executor = @executor
-          WHERE ID = @productId
+          WHERE article = @productId
           AND Prunit_Id = @prunitId
-        `;
-
-        // Если указан sklad_id, используем его, иначе используем locationId
-        if (sklad_id) {
-          updateQuery += ` AND id_scklad = @sklad_id`;
-        } else {
-          updateQuery += ` AND wr_shk = @locationId`;
-        }
+          AND wr_shk = @locationId
+          AND (@sklad_id IS NULL AND id_scklad IS NULL OR id_scklad = @sklad_id)`;
 
         logger.info('SQL запрос для обновления количества:', updateQuery);
 
@@ -580,11 +557,8 @@ class StorageRepository {
           .input('prunitId', prunitId)
           .input('locationId', locationId)
           .input('newQuantity', newQuantity)
-          .input('executor', executor);
-
-        if (sklad_id) {
-          updateRequest.input('sklad_id', sklad_id);
-        }
+          .input('executor', executor)
+          .input('sklad_id', sklad_id || null);
 
         await updateRequest.query(updateQuery);
       }
@@ -602,7 +576,6 @@ class StorageRepository {
       });
 
       return {
-        id: productId,
         locationId: locationId,
         prunitId: prunitId,
         name: item.name,
@@ -681,7 +654,7 @@ class StorageRepository {
 
         let deleteQuery = `
           DELETE FROM [SPOe_rc].[dbo].[x_Storage_Full_Info]
-          WHERE ID = @productId
+          WHERE article = @productId
           AND Prunit_Id = @prunitId
           AND WR_SHK = @locationId
         `;
@@ -711,7 +684,7 @@ class StorageRepository {
               Place_QNT = @newQuantity,
               Update_Date = GETDATE(),
               Executor = @executor
-          WHERE ID = @productId
+          WHERE article = @productId
           AND Prunit_Id = @prunitId
           AND WR_SHK = @locationId
         `;
@@ -750,7 +723,6 @@ class StorageRepository {
       });
 
       return {
-        id: productId,
         locationId: locationId,
         prunitId: prunitId,
         name: item.Name,
@@ -848,7 +820,7 @@ class StorageRepository {
           start_expiration_date,
           end_expiration_date
         FROM [SPOe_rc].[dbo].[x_Storage_Full_Info]
-        WHERE id = @article
+        WHERE article = @article
         AND product_qnt > 0
         ORDER BY id_scklad
       `;
@@ -960,6 +932,118 @@ class StorageRepository {
       logger.error('Ошибка при логировании операции:', error);
       // Не выбрасываем ошибку, чтобы не прерывать основную операцию
       return false;
+    }
+  }
+
+  /**
+   * Добавление товара в буфер
+   */
+  async addToBuffer(data) {
+    try {
+      logger.info('Добавление товара в буфер:', JSON.stringify(data));
+
+      // Определяем prunit_name из справочника
+      const prunitInfo = this.prunitTypes[data.prunitId] || this.prunitTypes[0];
+      const prunitName = prunitInfo.name;
+
+      logger.info(`Определен тип единицы хранения: ${prunitName} для prunitId: ${data.prunitId}`);
+
+      // Проверяем существование записи по article
+      const checkQuery = `
+        SELECT ID, Product_QNT, Place_QNT
+        FROM [SPOe_rc].[dbo].[x_Storage_Full_Info]
+        WHERE Article = @article
+        AND Prunit_Id = @prunitId
+        AND WR_SHK = @wrShk
+        AND (@idScklad IS NULL AND id_scklad IS NULL OR id_scklad = @idScklad)
+      `;
+
+      const checkResult = await this.pool.request()
+        .input('article', data.article)
+        .input('prunitId', data.prunitId)
+        .input('wrShk', data.wrShk)
+        .input('idScklad', data.sklad_id || null)
+        .query(checkQuery);
+
+      // Если найдена точно такая же запись - обновляем её
+      if (checkResult.recordset.length > 0) {
+        logger.info('Найдена существующая запись с точным совпадением, обновляем количество');
+
+        const updateQuery = `
+          UPDATE [SPOe_rc].[dbo].[x_Storage_Full_Info]
+          SET Product_QNT = Product_QNT + @quantity,
+              Place_QNT = Place_QNT + @quantity,
+              Condition_State = @conditionState,
+              Expiration_Date = COALESCE(@expirationDate, Expiration_Date),
+              Executor = @executor,
+              Prunit_Name = @prunitName,
+              Update_Date = GETDATE()
+          WHERE Article = @article
+          AND Prunit_Id = @prunitId
+          AND WR_SHK = @wrShk
+          AND (@idScklad IS NULL AND id_scklad IS NULL OR id_scklad = @idScklad)
+        `;
+
+        const updateResult = await this.pool.request()
+          .input('article', data.article)
+          .input('prunitId', data.prunitId)
+          .input('quantity', data.quantity)
+          .input('wrShk', data.wrShk)
+          .input('idScklad', data.sklad_id || null)
+          .input('expirationDate', data.expirationDate || null)
+          .input('conditionState', data.conditionState || 'кондиция')
+          .input('executor', data.executor)
+          .input('prunitName', prunitName)
+          .query(updateQuery);
+
+        logger.info(`Обновлена существующая запись в буфере. Затронуто строк: ${updateResult.rowsAffected[0]}`);
+        return updateResult.rowsAffected[0] > 0;
+      }
+
+      // Если точного совпадения нет - создаем новую запись с новым ID
+      logger.info('Точное совпадение не найдено, создаем новую запись');
+
+      // Получаем максимальный ID из таблицы
+      const getMaxIdQuery = `
+        SELECT MAX(CAST(ID as INT)) as maxId
+        FROM [SPOe_rc].[dbo].[x_Storage_Full_Info]
+      `;
+
+      const maxIdResult = await this.pool.request().query(getMaxIdQuery);
+      const maxId = maxIdResult.recordset[0].maxId || 0;
+      const newId = (maxId + 1).toString();
+
+      logger.info(`Генерируем новый ID: ${newId}`);
+
+      const insertQuery = `
+        INSERT INTO [SPOe_rc].[dbo].[x_Storage_Full_Info]
+        (ID, Name, Article, SHK, Product_QNT, Place_QNT, Prunit_Name, Prunit_Id,
+         WR_SHK, id_scklad, Expiration_Date, Condition_State, Executor, Create_Date)
+        VALUES
+        (@newId, @name, @article, @shk, @quantity, @quantity, @prunitName, @prunitId,
+         @wrShk, @idScklad, @expirationDate, @conditionState, @executor, GETDATE())
+      `;
+
+      const insertResult = await this.pool.request()
+        .input('newId', newId)
+        .input('name', data.name || '')
+        .input('article', data.article || '')
+        .input('shk', data.shk || '')
+        .input('quantity', data.quantity)
+        .input('prunitId', data.prunitId)
+        .input('prunitName', prunitName)
+        .input('wrShk', data.wrShk)
+        .input('idScklad', data.sklad_id || null)
+        .input('expirationDate', data.expirationDate || null)
+        .input('conditionState', data.conditionState || 'кондиция')
+        .input('executor', data.executor)
+        .query(insertQuery);
+
+      logger.info(`Добавлена новая запись в буфер с ID ${newId}. Затронуто строк: ${insertResult.rowsAffected[0]}`);
+      return insertResult.rowsAffected[0] > 0;
+    } catch (error) {
+      logger.error('Ошибка при добавлении товара в буфер:', error);
+      throw error;
     }
   }
 }
