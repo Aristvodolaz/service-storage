@@ -617,108 +617,89 @@ class StorageController {
   }
 
   /**
-   * Перемещение товара между ячейками (пятнашка)
+   * Перемещение товара между ячейками
    */
   async moveItemBetweenLocations(req, res) {
     try {
-      const { productId } = req.params;
+      logger.info('Начало выполнения moveItemBetweenLocations в контроллере');
+      logger.info('Тело запроса:', JSON.stringify(req.body));
+
       const {
+        productId,
         sourceLocationId,
         targetLocationId,
+        targetWrShk,
         prunitId,
         quantity,
         conditionState,
         expirationDate,
-        executor,
         id_sklad
       } = req.body;
 
-      logger.info('=== НАЧАЛО ОПЕРАЦИИ ПЕРЕМЕЩЕНИЯ ТОВАРА ===');
-      logger.info(`Товар: ${productId}, Единица хранения: ${prunitId}, Количество: ${quantity}`);
-      logger.info(`Откуда: ${sourceLocationId}, Куда: ${targetLocationId} `);
-      logger.info(`Исполнитель: ${executor}`);
-      if (conditionState) logger.info(`Состояние товара: ${conditionState}`);
-      if (expirationDate) logger.info(`Срок годности: ${expirationDate}`);
-      if (id_sklad) logger.info(`ID склада: ${id_sklad}`);
-
-      if (!productId || !sourceLocationId || !targetLocationId || !prunitId || !quantity || !executor) {
-        logger.warn('Не указаны все обязательные параметры');
+      // Проверяем обязательные параметры
+      if (!productId || !sourceLocationId || !targetLocationId || !prunitId || !quantity) {
+        logger.warn('Отсутствуют обязательные параметры');
         return res.status(400).json({
           success: false,
-          errorCode: 400,
-          msg: 'Необходимо указать все обязательные параметры'
+          msg: 'Отсутствуют обязательные параметры'
         });
       }
 
-      // Проверяем, что количество является числом
-      const parsedQuantity = parseFloat(quantity);
-      if (isNaN(parsedQuantity) || parsedQuantity <= 0) {
-        logger.warn('Некорректное значение количества:', quantity);
-        return res.status(400).json({
-          success: false,
-          errorCode: 400,
-          msg: 'Количество должно быть положительным числом'
-        });
-      }
+      // Получаем информацию о пользователе из JWT
+      const executor = req.user ? req.user.username : 'system';
 
-      // Проверяем корректность состояния товара
-      if (conditionState && !['кондиция', 'некондиция'].includes(conditionState)) {
-        logger.warn('Некорректное значение состояния товара:', conditionState);
-        return res.status(400).json({
-          success: false,
-          errorCode: 400,
-          msg: 'Некорректное значение состояния товара'
-        });
-      }
-
-      // Проверяем корректность срока годности
-      if (expirationDate && isNaN(Date.parse(expirationDate))) {
-        logger.warn('Некорректный формат срока годности:', expirationDate);
-        return res.status(400).json({
-          success: false,
-          errorCode: 400,
-          msg: 'Некорректный формат срока годности'
-        });
-      }
-
+      // Вызываем сервис для перемещения товара
       const result = await storageService.moveItemBetweenLocations({
         productId,
         sourceLocationId,
         targetLocationId,
+        targetWrShk,
         prunitId,
-        quantity: parsedQuantity,
+        quantity: parseFloat(quantity),
         conditionState,
         expirationDate,
         executor,
         id_sklad
       });
 
-      if (!result.success) {
-        logger.warn('Перемещение товара завершилось неудачей:', result.msg);
-        logger.info('=== КОНЕЦ ОПЕРАЦИИ ПЕРЕМЕЩЕНИЯ ТОВАРА (НЕУДАЧА) ===');
-        return res.status(result.errorCode).json(result);
+      // Обрабатываем результат
+      if (result.error) {
+        let statusCode = 400;
+
+        // Определяем статус-код ответа в зависимости от типа ошибки
+        if (result.error === 'not_found') {
+          statusCode = 404;
+        } else if (result.error === 'insufficient_quantity') {
+          statusCode = 400;
+        } else if (result.error === 'same_location') {
+          statusCode = 400;
+        } else if (result.error === 'missing_param') {
+          statusCode = 400;
+        } else if (result.error === 'invalid_quantity') {
+          statusCode = 400;
+        }
+
+        logger.warn(`Ошибка при перемещении товара: ${result.error}, ${result.msg}`);
+        return res.status(statusCode).json({
+          success: false,
+          error: result.error,
+          msg: result.msg,
+          available: result.available
+        });
       }
 
-      // Подробное логирование результата
-      logger.info('=== РЕЗУЛЬТАТ ОПЕРАЦИИ ПЕРЕМЕЩЕНИЯ ТОВАРА ===');
-      logger.info(`Товар "${result.data.movedInfo.name}" (ID: ${result.data.movedInfo.productId}, Артикул: ${result.data.movedInfo.article})`);
-      logger.info(`Единица хранения: ${result.data.movedInfo.prunitName} (ID: ${result.data.movedInfo.prunitId})`);
-      logger.info(`Перемещено: ${result.data.movedInfo.quantity} ед.`);
-      logger.info(`Из ячейки: ${result.data.sourceInfo.locationId} (было: ${result.data.sourceInfo.previousQuantity}, осталось: ${result.data.sourceInfo.remainingQuantity} ед.)`);
-      logger.info(`В ячейку: ${result.data.targetInfo.locationId} (ШК: ${result.data.targetInfo.wrShk}, было: ${result.data.targetInfo.previousQuantity}, стало: ${result.data.targetInfo.newQuantity} ед.)`);
-      logger.info(`Состояние товара: ${result.data.movedInfo.conditionState}`);
-      if (result.data.movedInfo.expirationDate) logger.info(`Срок годности: ${result.data.movedInfo.expirationDate}`);
-      logger.info(`Полное перемещение: ${result.data.movedInfo.isFullMove ? 'Да' : 'Нет'}`);
-      logger.info('=== КОНЕЦ ОПЕРАЦИИ ПЕРЕМЕЩЕНИЯ ТОВАРА (УСПЕХ) ===');
-
-      return res.status(200).json(result);
+      // Успешный ответ
+      logger.info('Товар успешно перемещен');
+      return res.status(200).json({
+        success: true,
+        msg: 'Товар успешно перемещен',
+        data: result
+      });
     } catch (error) {
-      logger.error('Ошибка при перемещении товара между ячейками:', error);
-      logger.info('=== КОНЕЦ ОПЕРАЦИИ ПЕРЕМЕЩЕНИЯ ТОВАРА (ОШИБКА) ===');
+      logger.error('Ошибка при перемещении товара:', error);
       return res.status(500).json({
         success: false,
-        errorCode: 500,
-        msg: 'Внутренняя ошибка сервера'
+        msg: 'Внутренняя ошибка сервера при перемещении товара'
       });
     }
   }

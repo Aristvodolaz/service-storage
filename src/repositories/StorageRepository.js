@@ -914,8 +914,8 @@ class StorageRepository {
         .input('operationType', data.operationType)
         .input('productId', data.productId)
         .input('prunitId', data.prunitId)
-        .input('fromLocationId', data.fromLocationId)
-        .input('toLocationId', data.toLocationId)
+        .input('fromLocationId', sql.NVarChar, data.fromLocationId ? data.fromLocationId.toString() : null)
+        .input('toLocationId', sql.NVarChar, data.toLocationId ? data.toLocationId.toString() : null)
         .input('quantity', data.quantity)
         .input('conditionState', data.conditionState)
         .input('executor', data.executor);
@@ -1696,19 +1696,17 @@ class StorageRepository {
   }
 
   /**
-   * Перемещение товара между ячейками
+   * Перемещение товара между ячейками (улучшенная версия)
    * @param {Object} params - Параметры перемещения
    * @returns {Promise<Object>} - Результат перемещения
    */
-  async moveItemBetweenLocations(params) {
+  async moveItemBetweenLocationsV2(params) {
     try {
-      logger.info('Начало выполнения moveItemBetweenLocations');
-      logger.info('Параметры:', JSON.stringify(params));
-
       const {
         productId,
         sourceLocationId,
         targetLocationId,
+        targetWrShk,
         prunitId,
         quantity,
         conditionState,
@@ -1718,41 +1716,42 @@ class StorageRepository {
         id_sklad
       } = params;
 
+      // Используем targetWrShk, если он указан, иначе используем targetLocationId
+      const actualTargetWrShk = targetWrShk || targetLocationId;
+
       // Проверяем, что исходная и целевая ячейки не совпадают
-      if (sourceLocationId === targetLocationId) {
-        logger.warn(`Исходная и целевая ячейки совпадают: ${sourceLocationId}`);
+      if (sourceLocationId === actualTargetWrShk) {
         return {
           error: 'same_location',
           msg: 'Исходная и целевая ячейки не могут совпадать'
         };
       }
 
+      // Проверяем обязательные параметры
+      if (!productId || !sourceLocationId || !actualTargetWrShk || !prunitId) {
+        return {
+          error: 'missing_params',
+          msg: 'Не указаны обязательные параметры для перемещения'
+        };
+      }
+
       // Получаем информацию о товаре в исходной ячейке
-      let sourceQuery = `
+      const sourceQuery = `
         SELECT * FROM [SPOe_rc].[dbo].[x_Storage_Full_Info]
         WHERE Article = @productId
         AND Prunit_Id = @prunitId
         AND WR_SHK = @sourceLocationId
+        AND ((@idScklad IS NULL AND id_scklad IS NULL) OR id_scklad = @idScklad)
       `;
 
-      // Добавляем условие по id_sklad, если оно указано
-      if (id_sklad) {
-        sourceQuery += ` AND id_scklad = @id_sklad`;
-      }
-
-      const sourceRequest = this.pool.request()
+      const sourceResult = await this.pool.request()
         .input('productId', productId)
         .input('prunitId', prunitId)
-        .input('sourceLocationId', sourceLocationId);
-
-      if (id_sklad) {
-        sourceRequest.input('id_sklad', id_sklad);
-      }
-
-      const sourceResult = await sourceRequest.query(sourceQuery);
+        .input('sourceLocationId', sourceLocationId)
+        .input('idScklad', id_sklad)
+        .query(sourceQuery);
 
       if (sourceResult.recordset.length === 0) {
-        logger.warn(`Товар с артикулом ${productId} и единицей хранения ${prunitId} не найден в ячейке ${sourceLocationId}${id_sklad ? ` с id_sklad=${id_sklad}` : ''}`);
         return {
           error: 'not_found',
           msg: 'Товар не найден в исходной ячейке'
@@ -1761,13 +1760,13 @@ class StorageRepository {
 
       const sourceItem = sourceResult.recordset[0];
       const sourceQuantity = parseFloat(sourceItem.Place_QNT) || 0;
+      const requestedQuantity = parseFloat(quantity) || 0;
 
-      if (sourceQuantity < quantity) {
-        logger.warn(`Недостаточное количество товара. Доступно: ${sourceQuantity}, запрошено: ${quantity}`);
+      if (sourceQuantity < requestedQuantity) {
         return {
           error: 'insufficient_quantity',
           available: sourceQuantity,
-          msg: `Недостаточное количество товара. Доступно: ${sourceQuantity}, запрошено: ${quantity}`
+          msg: `Недостаточное количество товара. Доступно: ${sourceQuantity}, запрошено: ${requestedQuantity}`
         };
       }
 
@@ -1783,7 +1782,7 @@ class StorageRepository {
       const targetResult = await this.pool.request()
         .input('productId', productId)
         .input('prunitId', prunitId)
-        .input('targetLocationId', targetLocationId)
+        .input('targetLocationId', actualTargetWrShk)
         .input('idScklad', id_sklad || sourceItem.id_scklad)
         .query(targetQuery);
 
@@ -1793,7 +1792,7 @@ class StorageRepository {
 
       try {
         // Обновляем количество в исходной ячейке
-        const newSourceQuantity = sourceQuantity - quantity;
+        const newSourceQuantity = sourceQuantity - requestedQuantity;
         const updateSourceQuery = `
           UPDATE [SPOe_rc].[dbo].[x_Storage_Full_Info]
           SET Place_QNT = @newQuantity,
@@ -1808,18 +1807,6 @@ class StorageRepository {
           .input('id', sourceItem.ID)
           .query(updateSourceQuery);
 
-        // Логируем операцию снятия из исходной ячейки
-        await this.logStorageOperationWithTransaction(transaction, {
-          operationType: 'перемещение_из',
-          productId: productId,
-          prunitId: prunitId,
-          fromLocationId: sourceLocationId,
-          toLocationId: targetLocationId,
-          quantity: -quantity,
-          conditionState: sourceItem.Condition_State || 'кондиция',
-          executor: executor
-        });
-
         let targetItem;
         let isNewRecord = false;
 
@@ -1827,7 +1814,7 @@ class StorageRepository {
           // Товар с такими параметрами уже есть в целевой ячейке - обновляем количество
           targetItem = targetResult.recordset[0];
           const targetQuantity = parseFloat(targetItem.Place_QNT) || 0;
-          const newTargetQuantity = targetQuantity + quantity;
+          const newTargetQuantity = targetQuantity + requestedQuantity;
 
           const updateTargetQuery = `
             UPDATE [SPOe_rc].[dbo].[x_Storage_Full_Info]
@@ -1840,12 +1827,10 @@ class StorageRepository {
 
           await new sql.Request(transaction)
             .input('newQuantity', newTargetQuantity)
-            .input('productQnt', parseFloat(targetItem.Product_QNT) + quantity)
+            .input('productQnt', parseFloat(targetItem.Product_QNT) + requestedQuantity)
             .input('executor', executor)
             .input('id', targetItem.ID)
             .query(updateTargetQuery);
-
-          logger.info(`Обновлено количество товара в целевой ячейке. ID: ${targetItem.ID}, Новое количество: ${newTargetQuantity}`);
         } else {
           // Товара с такими параметрами нет в целевой ячейке - создаем новую запись
           isNewRecord = true;
@@ -1874,10 +1859,10 @@ class StorageRepository {
             .input('name', sourceItem.Name)
             .input('article', productId)
             .input('shk', sourceItem.SHK)
-            .input('quantity', quantity)
+            .input('quantity', requestedQuantity)
             .input('prunitName', sourceItem.Prunit_Name)
             .input('prunitId', prunitId)
-            .input('wrShk', targetLocationId)
+            .input('wrShk', actualTargetWrShk)
             .input('idScklad', id_sklad || sourceItem.id_scklad)
             .input('conditionState', conditionState || sourceItem.Condition_State || 'кондиция')
             .input('expirationDate', expirationDate ? new Date(expirationDate) : sourceItem.Expiration_Date)
@@ -1889,35 +1874,20 @@ class StorageRepository {
             Name: sourceItem.Name,
             Article: productId,
             SHK: sourceItem.SHK,
-            Product_QNT: quantity,
-            Place_QNT: quantity,
+            Product_QNT: requestedQuantity,
+            Place_QNT: requestedQuantity,
             Prunit_Name: sourceItem.Prunit_Name,
             Prunit_Id: prunitId,
-            WR_SHK: targetLocationId,
+            WR_SHK: actualTargetWrShk,
             id_scklad: id_sklad || sourceItem.id_scklad,
             Condition_State: conditionState || sourceItem.Condition_State || 'кондиция',
             Expiration_Date: expirationDate ? new Date(expirationDate) : sourceItem.Expiration_Date
           };
-
-          logger.info(`Создана новая запись в целевой ячейке. ID: ${newId}, Количество: ${quantity}`);
         }
-
-        // Логируем операцию добавления в целевую ячейку
-        await this.logStorageOperationWithTransaction(transaction, {
-          operationType: 'перемещение_в',
-          productId: productId,
-          prunitId: prunitId,
-          fromLocationId: sourceLocationId,
-          toLocationId: targetLocationId,
-          quantity: quantity,
-          conditionState: targetItem.Condition_State || 'кондиция',
-          executor: executor
-        });
 
         // Завершаем транзакцию
         await transaction.commit();
 
-        logger.info('Перемещение товара успешно выполнено');
         return {
           success: true,
           sourceItem: {
@@ -1936,7 +1906,7 @@ class StorageRepository {
             article: targetItem.Article,
             shk: targetItem.SHK,
             previousQuantity: isNewRecord ? 0 : parseFloat(targetItem.Place_QNT) || 0,
-            newQuantity: isNewRecord ? quantity : (parseFloat(targetItem.Place_QNT) || 0) + quantity,
+            newQuantity: isNewRecord ? requestedQuantity : (parseFloat(targetItem.Place_QNT) || 0) + requestedQuantity,
             prunitId: targetItem.Prunit_Id,
             prunitName: targetItem.Prunit_Name,
             isNewRecord
@@ -1947,11 +1917,9 @@ class StorageRepository {
       } catch (error) {
         // В случае ошибки откатываем транзакцию
         await transaction.rollback();
-        logger.error('Ошибка при перемещении товара:', error);
         throw error;
       }
     } catch (error) {
-      logger.error('Ошибка в moveItemBetweenLocations:', error);
       throw error;
     }
   }
@@ -1972,6 +1940,7 @@ class StorageRepository {
         executor
       } = data;
 
+      // Преобразуем штрих-коды ячеек в строки, чтобы избежать переполнения int
       const query = `
         INSERT INTO [SPOe_rc].[dbo].[x_Storage_Operations_Log]
         (operation_type, product_id, prunit_id, from_location_id, to_location_id, quantity, condition_state, executor, operation_date)
@@ -1979,12 +1948,23 @@ class StorageRepository {
         (@operationType, @productId, @prunitId, @fromLocationId, @toLocationId, @quantity, @conditionState, @executor, GETDATE())
       `;
 
+      logger.info('Логирование операции перемещения:', JSON.stringify({
+        operationType,
+        productId,
+        prunitId,
+        fromLocationId: fromLocationId ? fromLocationId.toString() : null,
+        toLocationId: toLocationId ? toLocationId.toString() : null,
+        quantity,
+        conditionState,
+        executor
+      }));
+
       await new sql.Request(transaction)
         .input('operationType', operationType)
         .input('productId', productId)
         .input('prunitId', prunitId)
-        .input('fromLocationId', fromLocationId)
-        .input('toLocationId', toLocationId)
+        .input('fromLocationId', sql.NVarChar, fromLocationId ? fromLocationId.toString() : null)
+        .input('toLocationId', sql.NVarChar, toLocationId ? toLocationId.toString() : null)
         .input('quantity', quantity)
         .input('conditionState', conditionState)
         .input('executor', executor)

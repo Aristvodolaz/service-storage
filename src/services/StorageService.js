@@ -827,149 +827,66 @@ class StorageService {
   }
 
   /**
-   * Перемещение товара между ячейками (пятнашка)
+   * Перемещение товара между ячейками
+   * @param {Object} params - Параметры перемещения
+   * @returns {Promise<Object>} - Результат перемещения
    */
   async moveItemBetweenLocations(params) {
     try {
-      if (!this.repository) {
-        await this.initialize();
+      logger.info('Начало выполнения moveItemBetweenLocations в сервисе');
+      logger.info('Параметры:', JSON.stringify(params));
+
+      // Проверяем обязательные параметры
+      const requiredParams = ['productId', 'sourceLocationId', 'targetLocationId', 'prunitId', 'quantity', 'executor'];
+      for (const param of requiredParams) {
+        if (!params[param]) {
+          logger.warn(`Отсутствует обязательный параметр: ${param}`);
+          return {
+            error: 'missing_param',
+            param,
+            msg: `Отсутствует обязательный параметр: ${param}`
+          };
+        }
       }
 
-      const {
-        productId,
-        sourceLocationId,
-        targetLocationId,
-        prunitId,
-        quantity,
-        conditionState,
-        expirationDate,
-        executor,
-        id_sklad
-      } = params;
-
-      // Проверка корректности входных данных
-      if (typeof productId !== 'string') {
-        throw new Error('Некорректный формат ID товара');
-      }
-      if (typeof sourceLocationId !== 'string') {
-        throw new Error('Некорректный формат ID исходной ячейки');
-      }
-      if (typeof targetLocationId !== 'string') {
-        throw new Error('Некорректный формат ID целевой ячейки');
-      }
-      if (typeof prunitId !== 'string') {
-        throw new Error('Некорректный формат ID единицы хранения');
-      }
-      if (typeof quantity !== 'number' || quantity <= 0) {
-        throw new Error('Некорректное количество');
-      }
-      if (conditionState && !['кондиция', 'некондиция'].includes(conditionState)) {
-        throw new Error('Некорректное состояние товара');
-      }
-      if (expirationDate && isNaN(Date.parse(expirationDate))) {
-        throw new Error('Некорректный формат срока годности');
-      }
-      if (typeof executor !== 'string') {
-        throw new Error('Некорректный формат ID исполнителя');
-      }
-
-      // Получаем информацию о товаре перед перемещением
-      const sourceInfo = await this.repository.getLocationItems(sourceLocationId, id_sklad);
-      const sourceItem = sourceInfo.find(item =>
-        item.article === productId && item.prunit_id === prunitId
-      );
-
-      if (!sourceItem) {
+      // Проверяем, что исходная и целевая ячейки не совпадают
+      if (params.sourceLocationId === params.targetLocationId) {
+        logger.warn(`Исходная и целевая ячейки совпадают: ${params.sourceLocationId}`);
         return {
-          success: false,
-          errorCode: 404,
-          msg: 'Товар не найден в исходной ячейке'
+          error: 'same_location',
+          msg: 'Исходная и целевая ячейки не могут совпадать'
         };
       }
 
-      // Проверяем достаточное количество
-      if (sourceItem.place_qnt < quantity) {
+      // Проверяем, что количество положительное
+      const quantity = parseFloat(params.quantity);
+      if (isNaN(quantity) || quantity <= 0) {
+        logger.warn(`Некорректное количество: ${params.quantity}`);
         return {
-          success: false,
-          errorCode: 400,
-          msg: `Недостаточное количество товара. Доступно: ${sourceItem.place_qnt}, запрошено: ${quantity}`,
-          available: sourceItem.place_qnt
+          error: 'invalid_quantity',
+          msg: 'Количество должно быть положительным числом'
         };
       }
 
-      // Получаем информацию о целевой ячейке
-      const targetInfo = await this.repository.getLocationItems(targetLocationId, id_sklad);
-      const targetItem = targetInfo.find(item =>
-        item.article === productId && item.prunit_id === prunitId
-      );
-
-      const targetQuantity = targetItem ? targetItem.place_qnt : 0;
-      const isFullMove = sourceItem.place_qnt === quantity;
-
-      // Выполняем перемещение
-      const result = await this.repository.moveItemBetweenLocations({
-        productId,
-        sourceLocationId,
-        targetLocationId,
-        prunitId,
+      // Вызываем метод репозитория для перемещения товара
+      const result = await this.repository.moveItemBetweenLocationsV2({
+        productId: params.productId,
+        sourceLocationId: params.sourceLocationId,
+        targetLocationId: params.targetLocationId,
+        targetWrShk: params.targetWrShk,
+        prunitId: params.prunitId,
         quantity,
-        conditionState,
-        expirationDate,
-        executor,
-        isFullMove,
-        id_sklad
+        conditionState: params.conditionState,
+        expirationDate: params.expirationDate,
+        executor: params.executor,
+        isFullMove: params.isFullMove === true,
+        id_sklad: params.id_sklad
       });
 
-      if (!result) {
-        return {
-          success: false,
-          errorCode: 404,
-          msg: 'Не удалось выполнить перемещение товара'
-        };
-      }
-
-      if (result.error === 'insufficient_quantity') {
-        return {
-          success: false,
-          errorCode: 400,
-          msg: `Недостаточное количество товара. Доступно: ${result.available}`,
-          available: result.available
-        };
-      }
-
-      // Формируем подробный ответ
-      return {
-        success: true,
-        msg: 'Товар успешно перемещен',
-        data: {
-          ...result,
-          sourceInfo: {
-            locationId: sourceLocationId,
-            previousQuantity: sourceItem.place_qnt,
-            remainingQuantity: Math.max(0, sourceItem.place_qnt - quantity),
-            isEmptied: sourceItem.place_qnt <= quantity
-          },
-          targetInfo: {
-            wrShk: targetLocationId,
-            previousQuantity: targetQuantity,
-            newQuantity: targetQuantity + quantity
-          },
-          movedInfo: {
-            productId,
-            name: sourceItem.name,
-            article: sourceItem.article,
-            shk: sourceItem.shk,
-            prunitId,
-            prunitName: sourceItem.prunit_name,
-            quantity,
-            conditionState: result.conditionState,
-            expirationDate: result.expirationDate,
-            isFullMove
-          }
-        }
-      };
+      logger.info('Результат перемещения товара:', JSON.stringify(result));
+      return result;
     } catch (error) {
-      logger.error('Ошибка при перемещении товара между ячейками:', error);
+      logger.error('Ошибка при перемещении товара:', error);
       throw error;
     }
   }
