@@ -1102,6 +1102,44 @@ class StorageController {
       });
     }
   }
+
+  /**
+   * Получение информации о товаре по артикулу или ШК с фильтрацией по id_sklad
+   */
+  async getArticleInfoBySklad(req, res) {
+    try {
+      const { article, shk, id_sklad } = req.query;
+
+      // Проверяем, что указан хотя бы один параметр для поиска
+      if (!article && !shk) {
+        return res.status(400).json({
+          success: false,
+          error: 'missing_params',
+          msg: 'Необходимо указать артикул или штрих-код товара'
+        });
+      }
+
+      const result = await storageService.getArticleInfoBySklad({
+        article,
+        shk,
+        id_sklad
+      });
+
+      if (!result.success) {
+        const statusCode = result.error === 'not_found' ? 404 : 400;
+        return res.status(statusCode).json(result);
+      }
+
+      return res.status(200).json(result);
+    } catch (error) {
+      logger.error('Ошибка при получении информации о товаре:', error);
+      return res.status(500).json({
+        success: false,
+        error: 'server_error',
+        msg: 'Внутренняя ошибка сервера'
+      });
+    }
+  }
 }
 
 module.exports = new StorageController();

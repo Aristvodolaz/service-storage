@@ -1595,6 +1595,90 @@ class StorageService {
       };
     }
   }
+
+  /**
+   * Получение информации о товаре по артикулу или ШК с фильтрацией по id_sklad
+   * @param {Object} params - Параметры запроса
+   * @returns {Promise<Array>} - Массив записей о товаре
+   */
+  async getArticleInfoBySklad(params) {
+    try {
+      if (!this.repository) {
+        await this.initialize();
+      }
+
+      const { article, shk, id_sklad } = params;
+
+      // Проверяем, что указан хотя бы один параметр для поиска
+      if (!article && !shk) {
+        return {
+          success: false,
+          error: 'missing_params',
+          msg: 'Необходимо указать артикул или штрих-код товара'
+        };
+      }
+
+      const result = await this.repository.getArticleInfoBySklad({
+        article,
+        shk,
+        id_sklad
+      });
+
+      // Проверяем, вернулась ли ошибка
+      if (result && result.error) {
+        return {
+          success: false,
+          error: result.error,
+          msg: result.msg
+        };
+      }
+
+      // Если записей нет, возвращаем пустой массив
+      if (!result || result.length === 0) {
+        return {
+          success: true,
+          data: [],
+          msg: 'Записи не найдены'
+        };
+      }
+
+      // Группируем записи по ячейкам
+      const locationGroups = {};
+      result.forEach(item => {
+        const locationKey = item.wrShk || 'unknown';
+
+        if (!locationGroups[locationKey]) {
+          locationGroups[locationKey] = {
+            locationId: item.wrShk,
+            idScklad: item.idScklad,
+            items: []
+          };
+        }
+
+        locationGroups[locationKey].items.push(item);
+      });
+
+      return {
+        success: true,
+        data: {
+          article: result[0].article,
+          shk: result[0].shk,
+          name: result[0].name,
+          totalItems: result.length,
+          totalQuantity: result.reduce((sum, item) => sum + item.placeQnt, 0),
+          items: result,
+          locations: Object.values(locationGroups)
+        }
+      };
+    } catch (error) {
+      logger.error('Ошибка при получении информации о товаре:', error);
+      return {
+        success: false,
+        error: 'server_error',
+        msg: 'Ошибка при получении информации о товаре'
+      };
+    }
+  }
 }
 
 module.exports = new StorageService();

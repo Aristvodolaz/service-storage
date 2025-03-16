@@ -1735,4 +1735,7 @@ router.get('/inventory/summary', [
   validate
 ], storageController.getInventorySummary);
 
+// Получение информации о товаре по артикулу или ШК с фильтрацией по id_sklad
+router.get('/article-info', storageController.getArticleInfoBySklad);
+
 module.exports = router;

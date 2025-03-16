@@ -1976,6 +1976,78 @@ class StorageRepository {
       throw error;
     }
   }
+
+  /**
+   * Получение информации о товаре по артикулу или ШК с фильтрацией по id_sklad
+   * @param {Object} params - Параметры запроса
+   * @param {string} params.article - Артикул товара (опционально)
+   * @param {string} params.shk - Штрих-код товара (опционально)
+   * @param {string} params.id_sklad - ID склада (опционально)
+   * @returns {Promise<Array>} - Массив записей о товаре
+   */
+  async getArticleInfoBySklad(params) {
+    try {
+      const { article, shk, id_sklad } = params;
+
+      // Проверяем, что указан хотя бы один параметр для поиска
+      if (!article && !shk) {
+        return {
+          error: 'missing_params',
+          msg: 'Необходимо указать артикул или штрих-код товара'
+        };
+      }
+
+      let query = `
+        SELECT *
+        FROM [SPOe_rc].[dbo].[x_Storage_Full_Info]
+        WHERE 1=1
+      `;
+
+      const request = this.pool.request();
+
+      // Добавляем условия поиска
+      if (article) {
+        query += ` AND Article = @article`;
+        request.input('article', article);
+      }
+
+      if (shk) {
+        query += ` AND SHK = @shk`;
+        request.input('shk', shk);
+      }
+
+      // Добавляем фильтрацию по id_sklad, если указан
+      if (id_sklad) {
+        query += ` AND id_scklad = @id_sklad`;
+        request.input('id_sklad', id_sklad);
+      }
+
+      // Сортировка по ячейке и дате
+      query += ` ORDER BY WR_SHK, Create_Date DESC`;
+
+      const result = await request.query(query);
+
+      return result.recordset.map(item => ({
+        id: item.ID,
+        name: item.Name,
+        article: item.Article,
+        shk: item.SHK,
+        productQnt: parseFloat(item.Product_QNT) || 0,
+        placeQnt: parseFloat(item.Place_QNT) || 0,
+        prunitId: item.Prunit_Id,
+        prunitName: item.Prunit_Name,
+        wrShk: item.WR_SHK,
+        idScklad: item.id_scklad,
+        conditionState: item.Condition_State,
+        expirationDate: item.Expiration_Date,
+        createDate: item.Create_Date,
+        updateDate: item.Update_Date,
+        executor: item.Executor
+      }));
+    } catch (error) {
+      throw error;
+    }
+  }
 }
 
 module.exports = StorageRepository;
