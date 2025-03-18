@@ -1735,7 +1735,125 @@ router.get('/inventory/summary', [
   validate
 ], storageController.getInventorySummary);
 
+/**
+ * @swagger
+ * /api/storage/article-info:
+ *   get:
+ *     summary: Получение информации о товаре по артикулу или ШК с фильтрацией по id_sklad
+ *     tags: [Storage]
+ *     parameters:
+ *       - in: query
+ *         name: article
+ *         schema:
+ *           type: string
+ *         description: Артикул товара
+ *       - in: query
+ *         name: shk
+ *         schema:
+ *           type: string
+ *         description: Штрих-код товара
+ *       - in: query
+ *         name: id_sklad
+ *         schema:
+ *           type: string
+ *         description: ID склада
+ *     responses:
+ *       200:
+ *         description: Успешное получение информации о товаре
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     article:
+ *                       type: string
+ *                       example: "12345"
+ *                     shk:
+ *                       type: string
+ *                       example: "1234567890"
+ *                     name:
+ *                       type: string
+ *                       example: "Товар 1"
+ *                     totalItems:
+ *                       type: integer
+ *                       example: 2
+ *                     totalQuantity:
+ *                       type: number
+ *                       example: 10.5
+ *                     items:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                     locations:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *       400:
+ *         description: Ошибка в запросе
+ *       404:
+ *         description: Товар не найден
+ *       500:
+ *         description: Внутренняя ошибка сервера
+ */
 // Получение информации о товаре по артикулу или ШК с фильтрацией по id_sklad
 router.get('/article-info', storageController.getArticleInfoBySklad);
+
+/**
+ * @swagger
+ * /api/storage/empty-cells:
+ *   get:
+ *     summary: Получение списка пустых ячеек
+ *     tags: [Storage]
+ *     parameters:
+ *       - in: query
+ *         name: id_sklad
+ *         schema:
+ *           type: string
+ *         description: ID склада (WR_House) для фильтрации пустых ячеек
+ *     responses:
+ *       200:
+ *         description: Успешное получение списка пустых ячеек
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     cells:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           id:
+ *                             type: string
+ *                             example: "1"
+ *                           name:
+ *                             type: string
+ *                             example: "Ячейка A1"
+ *                           shk:
+ *                             type: string
+ *                             example: "SHK123456"
+ *                           wrHouse:
+ *                             type: string
+ *                             example: "Склад 1"
+ *                     count:
+ *                       type: integer
+ *                       example: 10
+ *       500:
+ *         description: Внутренняя ошибка сервера
+ */
+// Получение списка пустых ячеек
+router.get('/empty-cells', storageController.getEmptyCells);
 
 module.exports = router;

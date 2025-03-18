@@ -1140,6 +1140,30 @@ class StorageController {
       });
     }
   }
+
+  /**
+   * Получение списка пустых ячеек
+   */
+  async getEmptyCells(req, res) {
+    try {
+      const { id_sklad } = req.query;
+
+      const result = await storageService.getEmptyCells({ id_sklad });
+
+      if (!result.success) {
+        return res.status(500).json(result);
+      }
+
+      return res.status(200).json(result);
+    } catch (error) {
+      logger.error('Ошибка при получении списка пустых ячеек:', error);
+      return res.status(500).json({
+        success: false,
+        error: 'server_error',
+        msg: 'Внутренняя ошибка сервера'
+      });
+    }
+  }
 }
 
 module.exports = new StorageController();

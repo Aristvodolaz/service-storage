@@ -2048,6 +2048,53 @@ class StorageRepository {
       throw error;
     }
   }
+
+  /**
+   * Получение списка пустых ячеек
+   * @param {Object} params - Параметры запроса
+   * @param {string} params.id_sklad - ID склада (WR_House) для фильтрации (опционально)
+   * @returns {Promise<Array>} - Массив пустых ячеек
+   */
+  async getEmptyCells(params = {}) {
+    try {
+      const { id_sklad } = params;
+
+      let query = `
+        SELECT s.[ID], s.[Name], s.[SHK], s.[WR_House]
+        FROM [SPOe_rc].[dbo].[x_Storage_Scklads] s
+        WHERE NOT EXISTS (
+          SELECT 1
+          FROM [SPOe_rc].[dbo].[x_Storage_Full_Info] i
+          WHERE i.WR_SHK = s.SHK
+          AND i.Place_QNT > 0
+        )
+      `;
+
+      // Добавляем фильтрацию по WR_House, если указан id_sklad
+      if (id_sklad) {
+        query += ` AND s.[WR_House] = @id_sklad`;
+      }
+
+      query += ` ORDER BY s.[WR_House], s.[Name]`;
+
+      const request = this.pool.request();
+
+      if (id_sklad) {
+        request.input('id_sklad', id_sklad);
+      }
+
+      const result = await request.query(query);
+
+      return result.recordset.map(item => ({
+        id: item.ID,
+        name: item.Name,
+        shk: item.SHK,
+        wrHouse: item.WR_House
+      }));
+    } catch (error) {
+      throw error;
+    }
+  }
 }
 
 module.exports = StorageRepository;

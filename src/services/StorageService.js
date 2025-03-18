@@ -1679,6 +1679,37 @@ class StorageService {
       };
     }
   }
+
+  /**
+   * Получение списка пустых ячеек
+   * @param {Object} params - Параметры запроса
+   * @param {string} params.id_sklad - ID склада (WR_House) для фильтрации (опционально)
+   * @returns {Promise<Object>} - Объект с результатами
+   */
+  async getEmptyCells(params = {}) {
+    try {
+      if (!this.repository) {
+        await this.initialize();
+      }
+
+      const result = await this.repository.getEmptyCells(params);
+
+      return {
+        success: true,
+        data: {
+          cells: result,
+          count: result.length
+        }
+      };
+    } catch (error) {
+      logger.error('Ошибка при получении списка пустых ячеек:', error);
+      return {
+        success: false,
+        error: 'server_error',
+        msg: 'Ошибка при получении списка пустых ячеек'
+      };
+    }
+  }
 }
 
 module.exports = new StorageService();
