@@ -649,7 +649,7 @@ class StorageService {
         groupedItems[item.id].units.push({
           prunitId: item.prunit_id,
           prunitName: item.prunit_name,
-          quantity: item.product_qnt,
+          quantity: item.place_qnt,
           conditionState: item.condition_state,
           expirationDate: item.expiration_date
         });
