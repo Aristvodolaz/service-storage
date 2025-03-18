@@ -1164,6 +1164,34 @@ class StorageController {
       });
     }
   }
+
+  /**
+   * Получение всей информации из таблицы x_Storage_Full_Info
+   */
+  async getAllStorageInfo(req, res) {
+    try {
+      const { limit, offset, id_sklad } = req.query;
+
+      const result = await storageService.getAllStorageInfo({
+        limit,
+        offset,
+        id_sklad
+      });
+
+      if (!result.success) {
+        return res.status(500).json(result);
+      }
+
+      return res.status(200).json(result);
+    } catch (error) {
+      logger.error('Ошибка при получении данных о хранении:', error);
+      return res.status(500).json({
+        success: false,
+        error: 'server_error',
+        msg: 'Внутренняя ошибка сервера'
+      });
+    }
+  }
 }
 
 module.exports = new StorageController();

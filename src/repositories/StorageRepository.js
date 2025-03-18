@@ -2095,6 +2095,84 @@ class StorageRepository {
       throw error;
     }
   }
+
+  /**
+   * Получение всей информации из таблицы x_Storage_Full_Info
+   * @param {Object} params - Параметры запроса
+   * @param {number} params.limit - Ограничение количества записей (опционально)
+   * @param {number} params.offset - Смещение для пагинации (опционально)
+   * @param {string} params.id_sklad - ID склада для фильтрации (опционально)
+   * @returns {Promise<Object>} - Объект с данными и общим количеством записей
+   */
+  async getAllStorageInfo(params = {}) {
+    try {
+      const { limit = 1000, offset = 0, id_sklad } = params;
+
+      // Строим базовый запрос
+      let countQuery = `
+        SELECT COUNT(*) as total
+        FROM [SPOe_rc].[dbo].[x_Storage_Full_Info]
+        WHERE 1=1
+      `;
+
+      let dataQuery = `
+        SELECT *
+        FROM [SPOe_rc].[dbo].[x_Storage_Full_Info]
+        WHERE 1=1
+      `;
+
+      const request = this.pool.request();
+
+      // Добавляем фильтрацию по id_sklad, если указан
+      if (id_sklad) {
+        countQuery += ` AND id_scklad = @id_sklad`;
+        dataQuery += ` AND id_scklad = @id_sklad`;
+        request.input('id_sklad', id_sklad);
+      }
+
+      // Добавляем сортировку и пагинацию
+      dataQuery += `
+        ORDER BY ID
+        OFFSET @offset ROWS
+        FETCH NEXT @limit ROWS ONLY
+      `;
+
+      request.input('offset', offset);
+      request.input('limit', limit);
+
+      // Получаем общее количество записей
+      const countResult = await request.query(countQuery);
+      const total = countResult.recordset[0].total;
+
+      // Получаем данные с пагинацией
+      const dataResult = await request.query(dataQuery);
+
+      return {
+        items: dataResult.recordset.map(item => ({
+          id: item.ID,
+          name: item.Name,
+          article: item.Article,
+          shk: item.SHK,
+          productQnt: parseFloat(item.Product_QNT) || 0,
+          placeQnt: parseFloat(item.Place_QNT) || 0,
+          prunitId: item.Prunit_Id,
+          prunitName: item.Prunit_Name,
+          wrShk: item.WR_SHK,
+          idScklad: item.id_scklad,
+          conditionState: item.Condition_State,
+          expirationDate: item.Expiration_Date,
+          createDate: item.Create_Date,
+          updateDate: item.Update_Date,
+          executor: item.Executor
+        })),
+        total,
+        limit,
+        offset
+      };
+    } catch (error) {
+      throw error;
+    }
+  }
 }
 
 module.exports = StorageRepository;

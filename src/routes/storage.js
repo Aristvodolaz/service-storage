@@ -1856,4 +1856,82 @@ router.get('/article-info', storageController.getArticleInfoBySklad);
 // Получение списка пустых ячеек
 router.get('/empty-cells', storageController.getEmptyCells);
 
+/**
+ * @swagger
+ * /api/storage/all:
+ *   get:
+ *     summary: Получение всей информации из таблицы x_Storage_Full_Info
+ *     tags: [Storage]
+ *     parameters:
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 1000
+ *         description: Ограничение количества записей
+ *       - in: query
+ *         name: offset
+ *         schema:
+ *           type: integer
+ *           default: 0
+ *         description: Смещение для пагинации
+ *       - in: query
+ *         name: id_sklad
+ *         schema:
+ *           type: string
+ *         description: ID склада для фильтрации
+ *     responses:
+ *       200:
+ *         description: Успешное получение данных
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     items:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           id:
+ *                             type: string
+ *                           name:
+ *                             type: string
+ *                           article:
+ *                             type: string
+ *                           shk:
+ *                             type: string
+ *                           productQnt:
+ *                             type: number
+ *                           placeQnt:
+ *                             type: number
+ *                           prunitId:
+ *                             type: string
+ *                           prunitName:
+ *                             type: string
+ *                           wrShk:
+ *                             type: string
+ *                           idScklad:
+ *                             type: string
+ *                     total:
+ *                       type: integer
+ *                       description: Общее количество записей
+ *                     limit:
+ *                       type: integer
+ *                       description: Использованное ограничение количества записей
+ *                     offset:
+ *                       type: integer
+ *                       description: Использованное смещение для пагинации
+ *       500:
+ *         description: Внутренняя ошибка сервера
+ */
+// Получение всей информации из таблицы x_Storage_Full_Info
+router.get('/all', storageController.getAllStorageInfo);
+
 module.exports = router;

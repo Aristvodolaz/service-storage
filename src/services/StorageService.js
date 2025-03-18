@@ -1710,6 +1710,39 @@ class StorageService {
       };
     }
   }
+
+  /**
+   * Получение всей информации из таблицы x_Storage_Full_Info
+   * @param {Object} params - Параметры запроса
+   * @returns {Promise<Object>} - Объект с результатами
+   */
+  async getAllStorageInfo(params = {}) {
+    try {
+      if (!this.repository) {
+        await this.initialize();
+      }
+
+      const { limit, offset, id_sklad } = params;
+
+      const result = await this.repository.getAllStorageInfo({
+        limit: parseInt(limit) || 1000,
+        offset: parseInt(offset) || 0,
+        id_sklad
+      });
+
+      return {
+        success: true,
+        data: result
+      };
+    } catch (error) {
+      logger.error('Ошибка при получении данных о хранении:', error);
+      return {
+        success: false,
+        error: 'server_error',
+        msg: 'Ошибка при получении данных о хранении'
+      };
+    }
+  }
 }
 
 module.exports = new StorageService();
