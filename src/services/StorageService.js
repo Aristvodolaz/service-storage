@@ -265,24 +265,26 @@ class StorageService {
    * Размещение товара в буфер
    */
   async moveToBuffer(params) {
+    const {
+      productId,
+      prunitId,
+      quantity,
+      executor,
+      wrShk,
+      conditionState,
+      expirationDate,
+      name,
+      article,
+      reason,
+      shk,
+      sklad_id,
+      productQnt
+    } = params;
+
     try {
       if (!this.repository) {
         await this.initialize();
       }
-
-      const {
-        productId,
-        prunitId,
-        quantity,
-        executor,
-        wrShk,
-        conditionState,
-        expirationDate,
-        name,
-        article,
-        shk,
-        sklad_id
-      } = params;
 
       logger.info('Начало выполнения moveToBuffer');
       logger.info('Параметры:', JSON.stringify(params));
@@ -306,6 +308,9 @@ class StorageService {
       if (expirationDate && isNaN(Date.parse(expirationDate))) {
         throw new Error('Некорректный формат срока годности');
       }
+      if (productQnt !== undefined && (typeof productQnt !== 'number' || productQnt < 0)) {
+        throw new Error('Некорректное значение Product_QNT');
+      }
 
       // Добавляем товар в буфер
       const result = await this.repository.addToBuffer({
@@ -318,8 +323,10 @@ class StorageService {
         expirationDate,
         name,
         article,
+        reason,
         shk,
-        sklad_id
+        sklad_id,
+        productQnt
       });
 
       if (!result) {
@@ -338,7 +345,8 @@ class StorageService {
           locationId: wrShk,
           wrShk,
           conditionState: conditionState || 'кондиция',
-          expirationDate
+          expirationDate,
+          productQnt
         }
       };
     } catch (error) {
@@ -419,13 +427,6 @@ class StorageService {
       const newQuantity = bufferItem.quantity - quantity;
 
       if (condition === 'некондиция') {
-        // Регистрируем некондицию
-        await this.repository.registerDefect({
-          productId,
-          defectReason: 'Перемещение из буфера с отметкой некондиции',
-          executor
-        });
-
         // Если это полное изъятие, удаляем запись из буфера
         if (isFullRemoval) {
           // Удаляем запись из буфера
@@ -443,19 +444,6 @@ class StorageService {
             executor
           });
         }
-
-        // Логируем операцию
-        await this.repository.logStorageOperation({
-          operationType: 'изъятие_некондиция',
-          productId,
-          prunitId,
-          fromLocationId: locationId,
-          toLocationId: null,
-          quantity,
-          expirationDate: bufferItem.expirationDate,
-          conditionState: 'некондиция',
-          executor
-        });
 
         return {
           success: true,
@@ -510,19 +498,6 @@ class StorageService {
           quantity,
           conditionState: 'кондиция',
           expirationDate: bufferItem.expirationDate,
-          executor
-        });
-
-        // Логируем операцию
-        await this.repository.logStorageOperation({
-          operationType: 'перемещение',
-          productId,
-          prunitId,
-          fromLocationId: locationId,
-          toLocationId: targetLocationId,
-          quantity,
-          expirationDate: bufferItem.expirationDate,
-          conditionState: 'кондиция',
           executor
         });
 
@@ -1189,80 +1164,25 @@ class StorageService {
    */
   async performInventory(data) {
     try {
-      const { locationId, items, executor, idScklad, updateQuantities = false } = data;
+      logger.info('Начало выполнения инвентаризации:', JSON.stringify(data));
 
-      logger.info(`Выполнение инвентаризации ячейки: ${locationId}${idScklad ? `, склад: ${idScklad}` : ''}`);
-      logger.info(`Исполнитель: ${executor}, Обновлять количества: ${updateQuantities}`);
-
-      if (!locationId) {
-        logger.warn('Не указан штрих-код ячейки');
-        return {
-          success: false,
-          errorCode: 400,
-          msg: 'Необходимо указать штрих-код ячейки'
-        };
+      // Проверяем обязательные параметры
+      if (!data.locationId || !data.executor) {
+        throw new Error('Не указаны обязательные параметры');
       }
 
-      if (!executor) {
-        logger.warn('Не указан исполнитель');
-        return {
-          success: false,
-          errorCode: 400,
-          msg: 'Необходимо указать исполнителя'
-        };
-      }
-
-      if (!Array.isArray(items)) {
-        logger.warn('Некорректный формат списка товаров');
-        return {
-          success: false,
-          errorCode: 400,
-          msg: 'Список товаров должен быть массивом'
-        };
-      }
-
-      // Проверяем корректность данных о товарах
-      for (const item of items) {
-        if (!item.article || !item.prunitId) {
-          logger.warn('Некорректные данные о товаре:', item);
-          return {
-            success: false,
-            errorCode: 400,
-            msg: 'Для каждого товара необходимо указать артикул и единицу хранения'
-          };
-        }
-
-        if (isNaN(parseFloat(item.quantity)) || parseFloat(item.quantity) < 0) {
-          logger.warn('Некорректное количество товара:', item);
-          return {
-            success: false,
-            errorCode: 400,
-            msg: 'Количество товара должно быть неотрицательным числом'
-          };
-        }
+      // Проверяем, что items - это массив
+      if (!Array.isArray(data.items)) {
+        throw new Error('Параметр items должен быть массивом');
       }
 
       // Выполняем инвентаризацию
-      const result = await this.repository.performInventory({
-        locationId,
-        items,
-        executor,
-        idScklad,
-        updateQuantities
-      });
+      const result = await this.repository.performInventory(data);
 
-      return {
-        success: true,
-        data: result
-      };
+      return result;
     } catch (error) {
       logger.error('Ошибка при выполнении инвентаризации:', error);
-      return {
-        success: false,
-        errorCode: 500,
-        msg: 'Внутренняя ошибка сервера',
-        error: error.message
-      };
+      throw error;
     }
   }
 
@@ -1740,6 +1660,81 @@ class StorageService {
         success: false,
         error: 'server_error',
         msg: 'Ошибка при получении данных о хранении'
+      };
+    }
+  }
+
+  /**
+   * Обновление данных инвентаризации для конкретной записи
+   * @param {Object} params - Параметры обновления
+   * @returns {Promise<Object>} - Результат обновления
+   */
+  async updateInventoryItem(params) {
+    try {
+      if (!this.repository) {
+        await this.initialize();
+      }
+
+      const { id, quantity, expirationDate, conditionState, reason, executor } = params;
+
+      // Проверяем существование записи
+      const existingRecord = await this.repository.getStorageRecordById(id);
+      if (!existingRecord) {
+        return {
+          success: false,
+          errorCode: 404,
+          msg: 'Запись не найдена'
+        };
+      }
+
+      // Формируем объект с обновляемыми полями
+      const updateData = {
+        id,
+        executor,
+        update_date: new Date()
+      };
+
+      // Добавляем только те поля, которые были переданы
+      if (quantity !== undefined) {
+        updateData.place_qnt = quantity;
+      }
+      if (expirationDate !== undefined) {
+        updateData.expiration_date = expirationDate;
+      }
+      if (conditionState !== undefined) {
+        updateData.condition_state = conditionState;
+      }
+      if (reason !== undefined) {
+        updateData.reason = reason;
+      }
+
+      // Обновляем запись
+      const result = await this.repository.updateStorageRecord(updateData);
+
+      if (!result) {
+        return {
+          success: false,
+          errorCode: 400,
+          msg: 'Не удалось обновить запись'
+        };
+      }
+
+      return {
+        success: true,
+        msg: 'Данные инвентаризации успешно обновлены',
+        data: {
+          id,
+          updatedFields: Object.keys(updateData).filter(key => 
+            !['id', 'executor', 'update_date'].includes(key)
+          )
+        }
+      };
+    } catch (error) {
+      logger.error('Ошибка при обновлении данных инвентаризации:', error);
+      return {
+        success: false,
+        errorCode: 500,
+        msg: 'Внутренняя ошибка сервера: ' + error.message
       };
     }
   }

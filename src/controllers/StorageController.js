@@ -153,7 +153,8 @@ class StorageController {
         name,
         article,
         shk,
-        sklad_id
+        sklad_id,
+        productQnt
       } = req.body;
 
       logger.info('Получен запрос на размещение товара в буфер');
@@ -168,7 +169,8 @@ class StorageController {
         name,
         article,
         shk,
-        sklad_id
+        sklad_id,
+        productQnt
       });
 
       // Проверяем наличие обязательных параметров
@@ -247,7 +249,8 @@ class StorageController {
         name,
         article,
         shk,
-        sklad_id
+        sklad_id,
+        productQnt: productQnt ? parseFloat(productQnt) : undefined
       });
 
       if (!result.success) {
@@ -1189,6 +1192,47 @@ class StorageController {
         success: false,
         error: 'server_error',
         msg: 'Внутренняя ошибка сервера'
+      });
+    }
+  }
+
+  /**
+   * Обновление данных инвентаризации
+   */
+  async updateInventoryItem(req, res) {
+    try {
+      const { id, quantity, expirationDate, conditionState, reason } = req.body;
+      const executor = req.body.executor;
+
+      logger.info('Получен запрос на обновление данных инвентаризации:', {
+        id,
+        quantity,
+        expirationDate,
+        conditionState,
+        reason,
+        executor
+      });
+
+      const result = await storageService.updateInventoryItem({
+        id,
+        quantity,
+        expirationDate,
+        conditionState,
+        reason,
+        executor
+      });
+
+      if (!result.success) {
+        return res.status(result.errorCode || 400).json(result);
+      }
+
+      return res.json(result);
+    } catch (error) {
+      logger.error('Ошибка при обновлении данных инвентаризации:', error);
+      return res.status(500).json({
+        success: false,
+        errorCode: 500,
+        msg: 'Внутренняя ошибка сервера: ' + error.message
       });
     }
   }

@@ -295,7 +295,7 @@ router.post('/:productId/pick', [
  * /api/storage/{productId}/buffer:
  *   post:
  *     summary: Добавление товара в буфер
- *     description: Добавляет товар в буфер с учетом артикула, единицы хранения, штрих-кода ячейки и ID склада. Если найдена запись с таким же артикулом, единицей хранения, штрих-кодом ячейки и ID склада - обновляет количество, иначе создает новую запись с автоматически сгенерированным уникальным ID.
+ *     description: Добавляет товар в буфер с проверкой существования ячейки в справочнике складов. При добавлении проверяется соответствие wr_shk и id_sklad в таблице x_Storage_Scklads, и добавляется значение name_wr_shk из этой таблицы.
  *     tags: [Склад]
  *     parameters:
  *       - in: path
@@ -323,42 +323,34 @@ router.post('/:productId/pick', [
  *                 description: ID единицы хранения
  *               quantity:
  *                 type: number
- *                 description: Количество
+ *                 description: Количество для добавления в ячейку (Place_QNT)
+ *               productQnt:
+ *                 type: number
+ *                 description: Общее количество товара (Product_QNT). Если не указано, используется значение quantity
  *               executor:
  *                 type: string
  *                 description: ID исполнителя
  *               wrShk:
  *                 type: string
- *                 description: Штрих-код места хранения
+ *                 description: Штрих-код ячейки
+ *               sklad_id:
+ *                 type: string
+ *                 description: ID склада (должен соответствовать wr_house в x_Storage_Scklads)
+ *               reason:
+ *                 type: string
+ *                 description: Причина добавления в буфер
  *               conditionState:
  *                 type: string
- *                 enum: [кондиция, некондиция]
  *                 description: Состояние товара
  *               expirationDate:
  *                 type: string
- *                 description: Срок годности (формат YYYY-MM-DD или DD.MM.YYYY)
- *               name:
- *                 type: string
- *                 description: Наименование товара
- *               article:
- *                 type: string
- *                 description: Артикул товара
- *               shk:
- *                 type: string
- *                 description: Штрих-код товара
- *               sklad_id:
- *                 type: string
- *                 description: ID склада (соответствует полю id_scklad в базе данных)
+ *                 format: date-time
+ *                 description: Срок годности
  *     responses:
  *       200:
  *         description: Товар успешно добавлен в буфер
- *         content:
- *           application/json:
- *             schema:
- *               type: boolean
- *               description: true - операция выполнена успешно
  *       400:
- *         description: Ошибка валидации параметров
+ *         description: Ошибка валидации параметров или ячейка не найдена в справочнике
  *       500:
  *         description: Внутренняя ошибка сервера
  */
@@ -381,6 +373,7 @@ router.post('/:productId/buffer', [
   }),
   body('name').optional().isString(),
   body('article').optional().isString(),
+  body('reason').optional().isString(),
   body('shk').optional().isString(),
   body('sklad_id').optional().isString(),
   validate
@@ -453,7 +446,7 @@ router.post('/:productId/buffer/out', [
  * /api/storage/{productId}/buffer/move:
  *   post:
  *     summary: Перемещение товара между буферными ячейками
- *     description: Перемещает товар между ячейками. Если в целевой ячейке уже есть товар с таким же артикулом, единицей хранения и ID склада, то количества суммируются. Если данные не совпадают, создается новая запись с автоматически сгенерированным ID.
+ *     description: Перемещает товар между ячейками с проверкой существования целевой ячейки в справочнике складов. При перемещении проверяется соответствие wr_shk и id_sklad в таблице x_Storage_Scklads, и добавляется значение name_wr_shk из этой таблицы.
  *     tags: [Склад]
  *     parameters:
  *       - in: path
@@ -461,7 +454,7 @@ router.post('/:productId/buffer/out', [
  *         required: true
  *         schema:
  *           type: string
- *         description: ID товара
+ *         description: Артикул товара
  *     requestBody:
  *       required: true
  *       content:
@@ -471,40 +464,43 @@ router.post('/:productId/buffer/out', [
  *             required:
  *               - sourceLocationId
  *               - targetLocationId
- *               - targetWrShk
  *               - prunitId
  *               - quantity
  *               - executor
  *             properties:
  *               sourceLocationId:
  *                 type: string
- *                 description: ID исходной ячейки
+ *                 description: Штрих-код исходной ячейки
  *               targetLocationId:
  *                 type: string
- *                 description: ID целевой ячейки
+ *                 description: Штрих-код целевой ячейки
  *               targetWrShk:
  *                 type: string
- *                 description: Штрих-код целевой ячейки
+ *                 description: Альтернативный штрих-код целевой ячейки (если отличается от targetLocationId)
  *               prunitId:
- *                 type: string
+ *                 oneOf:
+ *                   - type: string
+ *                   - type: number
  *                 description: ID единицы хранения
  *               quantity:
  *                 type: number
- *                 description: Количество
- *               conditionState:
- *                 type: string
- *                 enum: [кондиция, некондиция]
- *                 description: Состояние товара (требуется только при частичном перемещении)
- *               expirationDate:
- *                 type: string
- *                 format: date
- *                 description: Срок годности (требуется только при частичном перемещении)
+ *                 description: Количество для перемещения
  *               executor:
  *                 type: string
  *                 description: ID исполнителя
  *               id_sklad:
  *                 type: string
- *                 description: ID склада. Если указан, то перемещение будет выполнено только для товаров с указанным ID склада.
+ *                 description: ID склада (должен соответствовать wr_house в x_Storage_Scklads)
+ *               conditionState:
+ *                 type: string
+ *                 description: Состояние товара
+ *               expirationDate:
+ *                 type: string
+ *                 format: date-time
+ *                 description: Срок годности
+ *               isFullMove:
+ *                 type: boolean
+ *                 description: Флаг полного перемещения товара
  *     responses:
  *       200:
  *         description: Товар успешно перемещен
@@ -515,63 +511,53 @@ router.post('/:productId/buffer/out', [
  *               properties:
  *                 success:
  *                   type: boolean
- *                   example: true
- *                 msg:
- *                   type: string
- *                   example: Товар успешно перемещен
- *                 data:
+ *                   description: Признак успешного выполнения операции
+ *                 sourceItem:
  *                   type: object
+ *                   description: Информация о товаре в исходной ячейке
  *                   properties:
- *                     sourceItem:
- *                       type: object
- *                       properties:
- *                         id:
- *                           type: string
- *                         name:
- *                           type: string
- *                         article:
- *                           type: string
- *                         shk:
- *                           type: string
- *                         previousQuantity:
- *                           type: number
- *                         newQuantity:
- *                           type: number
- *                         prunitId:
- *                           type: string
- *                         prunitName:
- *                           type: string
- *                     targetItem:
- *                       type: object
- *                       properties:
- *                         id:
- *                           type: string
- *                         name:
- *                           type: string
- *                         article:
- *                           type: string
- *                         shk:
- *                           type: string
- *                         previousQuantity:
- *                           type: number
- *                         newQuantity:
- *                           type: number
- *                         prunitId:
- *                           type: string
- *                         prunitName:
- *                           type: string
- *                         isNewRecord:
- *                           type: boolean
- *                           description: Флаг, указывающий, была ли создана новая запись
- *                     conditionState:
+ *                     id:
  *                       type: string
- *                     expirationDate:
+ *                     name:
  *                       type: string
- *                       format: date
+ *                     article:
+ *                       type: string
+ *                     shk:
+ *                       type: string
+ *                     previousQuantity:
+ *                       type: number
+ *                     newQuantity:
+ *                       type: number
+ *                     prunitId:
+ *                       type: string
+ *                     prunitName:
+ *                       type: string
+ *                 targetItem:
+ *                   type: object
+ *                   description: Информация о товаре в целевой ячейке
+ *                   properties:
+ *                     id:
+ *                       type: string
+ *                     name:
+ *                       type: string
+ *                     article:
+ *                       type: string
+ *                     shk:
+ *                       type: string
+ *                     previousQuantity:
+ *                       type: number
+ *                     newQuantity:
+ *                       type: number
+ *                     prunitId:
+ *                       type: string
+ *                     prunitName:
+ *                       type: string
+ *                     isNewRecord:
+ *                       type: boolean
  *       400:
- *         description: Ошибка валидации параметров, недостаточное количество или исходная и целевая ячейки совпадают
+ *         description: Ошибка валидации параметров, ячейка не найдена в справочнике или недостаточное количество товара
  *       404:
- *         description: Товар не найден в указанной ячейке
+ *         description: Товар не найден в исходной ячейке
  *       500:
  *         description: Внутренняя ошибка сервера
  */
@@ -1471,18 +1457,10 @@ router.get('/article/:article/details', [
 
 /**
  * @swagger
- * /api/storage/inventory/{locationId}:
+ * /api/storage/inventory:
  *   post:
- *     summary: Выполнение инвентаризации ячейки
- *     description: Выполняет инвентаризацию ячейки, сравнивая фактическое наличие товаров с данными в системе
- *     tags: [Desktop, Склад]
- *     parameters:
- *       - in: path
- *         name: locationId
- *         required: true
- *         schema:
- *           type: string
- *         description: Штрих-код ячейки
+ *     summary: Инвентаризация товара с опциональным изменением полей
+ *     tags: [Склад]
  *     requestBody:
  *       required: true
  *       content:
@@ -1490,250 +1468,41 @@ router.get('/article/:article/details', [
  *           schema:
  *             type: object
  *             required:
- *               - items
+ *               - id
  *               - executor
  *             properties:
- *               items:
- *                 type: array
- *                 description: Список товаров, обнаруженных при инвентаризации
- *                 items:
- *                   type: object
- *                   required:
- *                     - article
- *                     - prunitId
- *                     - quantity
- *                   properties:
- *                     article:
- *                       type: string
- *                       description: Артикул товара
- *                     name:
- *                       type: string
- *                       description: Наименование товара (опционально, для новых товаров)
- *                     prunitId:
- *                       type: string
- *                       description: ID единицы хранения
- *                     quantity:
- *                       type: number
- *                       description: Фактическое количество товара
- *                     shk:
- *                       type: string
- *                       description: Штрих-код товара (опционально, для новых товаров)
- *                     conditionState:
- *                       type: string
- *                       enum: [кондиция, некондиция]
- *                       description: Состояние товара (опционально)
- *                     notes:
- *                       type: string
- *                       description: Примечания к товару (опционально)
+ *               id:
+ *                 type: string
+ *                 description: ID записи в x_Storage_Full_Info
+ *               quantity:
+ *                 type: number
+ *                 description: Новое количество товара
+ *               expirationDate:
+ *                 type: string
+ *                 format: date
+ *                 description: Новый срок годности
+ *               conditionState:
+ *                 type: string
+ *                 enum: [кондиция, некондиция]
+ *                 description: Новое состояние товара
+ *               reason:
+ *                 type: string
+ *                 description: Причина изменения
  *               executor:
  *                 type: string
- *                 description: ID исполнителя инвентаризации
- *               idScklad:
- *                 type: string
- *                 description: ID склада (опционально)
- *               updateQuantities:
- *                 type: boolean
- *                 description: Флаг, указывающий, нужно ли обновлять количества товаров в системе (по умолчанию false)
- *     responses:
- *       200:
- *         description: Инвентаризация успешно выполнена
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 data:
- *                   type: object
- *                   properties:
- *                     locationId:
- *                       type: string
- *                       description: Штрих-код ячейки
- *                     idScklad:
- *                       type: string
- *                       description: ID склада
- *                     status:
- *                       type: string
- *                       enum: [match, discrepancy, completed]
- *                       description: Статус инвентаризации
- *                     message:
- *                       type: string
- *                       description: Сообщение о результате инвентаризации
- *                     inventoryResults:
- *                       type: array
- *                       description: Результаты инвентаризации по каждому товару
- *                       items:
- *                         type: object
- *       400:
- *         description: Некорректные параметры запроса
- *       500:
- *         description: Внутренняя ошибка сервера
+ *                 description: ID исполнителя
  */
-router.post('/inventory/:locationId', [
-  param('locationId').isString().trim().notEmpty(),
-  body('items').isArray(),
+router.post('/inventory', [
+  body('id').isString().trim().notEmpty(),
+  body('quantity').optional().isFloat({ min: 0 }),
+  body('expirationDate').optional().custom(value => {
+    return value === null || !isNaN(Date.parse(value));
+  }),
+  body('conditionState').optional().isIn(['кондиция', 'некондиция']),
+  body('reason').optional().isString(),
   body('executor').isString().trim().notEmpty(),
-  body('idScklad').optional().isString().trim(),
-  body('updateQuantities').optional().isBoolean(),
   validate
-], storageController.performInventory);
-
-/**
- * @swagger
- * /api/storage/inventory/history:
- *   get:
- *     summary: Получение истории инвентаризаций
- *     description: Возвращает историю инвентаризаций с возможностью фильтрации по различным параметрам
- *     tags: [Desktop, Склад]
- *     parameters:
- *       - in: query
- *         name: locationId
- *         schema:
- *           type: string
- *         description: Штрих-код ячейки для фильтрации
- *       - in: query
- *         name: article
- *         schema:
- *           type: string
- *         description: Артикул товара для фильтрации
- *       - in: query
- *         name: startDate
- *         schema:
- *           type: string
- *           format: date
- *         description: Начальная дата для фильтрации (формат YYYY-MM-DD)
- *       - in: query
- *         name: endDate
- *         schema:
- *           type: string
- *           format: date
- *         description: Конечная дата для фильтрации (формат YYYY-MM-DD)
- *       - in: query
- *         name: executor
- *         schema:
- *           type: string
- *         description: ID исполнителя для фильтрации
- *       - in: query
- *         name: status
- *         schema:
- *           type: string
- *           enum: [match, surplus, shortage, missing, not_found]
- *         description: Статус инвентаризации для фильтрации
- *       - in: query
- *         name: limit
- *         schema:
- *           type: integer
- *         description: Ограничение количества записей
- *     responses:
- *       200:
- *         description: История инвентаризаций успешно получена
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 data:
- *                   type: object
- *                   properties:
- *                     records:
- *                       type: array
- *                       description: Записи истории инвентаризаций
- *                       items:
- *                         type: object
- *                     groupedRecords:
- *                       type: array
- *                       description: Записи, сгруппированные по дате и ячейке
- *                       items:
- *                         type: object
- *       400:
- *         description: Некорректные параметры запроса
- *       500:
- *         description: Внутренняя ошибка сервера
- */
-router.get('/inventory/history', [
-  query('locationId').optional().isString().trim(),
-  query('article').optional().isString().trim(),
-  query('startDate').optional().isString().trim(),
-  query('endDate').optional().isString().trim(),
-  query('executor').optional().isString().trim(),
-  query('status').optional().isString().trim(),
-  query('limit').optional().isInt().toInt(),
-  validate
-], storageController.getInventoryHistory);
-
-/**
- * @swagger
- * /api/storage/inventory/summary:
- *   get:
- *     summary: Получение сводного отчета по инвентаризациям
- *     description: Возвращает сводный отчет по инвентаризациям с различными статистическими данными
- *     tags: [Desktop, Склад]
- *     parameters:
- *       - in: query
- *         name: startDate
- *         schema:
- *           type: string
- *           format: date
- *         description: Начальная дата для фильтрации (формат YYYY-MM-DD)
- *       - in: query
- *         name: endDate
- *         schema:
- *           type: string
- *           format: date
- *         description: Конечная дата для фильтрации (формат YYYY-MM-DD)
- *       - in: query
- *         name: executor
- *         schema:
- *           type: string
- *         description: ID исполнителя для фильтрации
- *       - in: query
- *         name: status
- *         schema:
- *           type: string
- *           enum: [match, surplus, shortage, missing, not_found]
- *         description: Статус инвентаризации для фильтрации
- *     responses:
- *       200:
- *         description: Сводный отчет по инвентаризациям успешно получен
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 data:
- *                   type: object
- *                   properties:
- *                     summary:
- *                       type: object
- *                       description: Общая статистика по инвентаризациям
- *                     details:
- *                       type: object
- *                       description: Детальная статистика по различным параметрам
- *                     inventories:
- *                       type: array
- *                       description: Список инвентаризаций
- *                       items:
- *                         type: object
- *       400:
- *         description: Некорректные параметры запроса
- *       500:
- *         description: Внутренняя ошибка сервера
- */
-router.get('/inventory/summary', [
-  query('startDate').optional().isString().trim(),
-  query('endDate').optional().isString().trim(),
-  query('executor').optional().isString().trim(),
-  query('status').optional().isString().trim(),
-  validate
-], storageController.getInventorySummary);
+], storageController.updateInventoryItem);
 
 /**
  * @swagger
