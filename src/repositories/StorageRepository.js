@@ -620,7 +620,7 @@ class StorageRepository {
    */
   async pickFromLocationBySkladId(data) {
     try {
-      const { productId, locationId, prunitId, quantity, executor, sklad_id } = data;
+      const { productId, locationId, prunitId, quantity, executor, sklad_id, productQnt } = data;
 
       logger.info('Забор товара из ячейки по sklad_id:', JSON.stringify(data));
 
@@ -701,7 +701,7 @@ class StorageRepository {
         // Обновляем количество товара в ячейке
         let updateQuery = `
           UPDATE [SPOe_rc].[dbo].[x_Storage_Full_Info]
-          SET Product_QNT = @newQuantity,
+          SET Product_QNT = @productQnt,
               Place_QNT = @newQuantity,
               Update_Date = GETDATE(),
               Executor = @executor
@@ -722,6 +722,7 @@ class StorageRepository {
           .input('prunitId', prunitId)
           .input('locationId', locationId)
           .input('newQuantity', newQuantity)
+          .inpu('productQnt', productQnt)
           .input('executor', executor);
 
         if (sklad_id) {
