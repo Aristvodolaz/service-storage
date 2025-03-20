@@ -1998,7 +1998,9 @@ class StorageRepository {
         expirationDate: item.Expiration_Date,
         createDate: item.Create_Date,
         updateDate: item.Update_Date,
-        executor: item.Executor
+        executor: item.Executor,
+        name_wr_shk: item.name_wr_shk,
+        reason:item.reason
       }));
     } catch (error) {
       throw error;
