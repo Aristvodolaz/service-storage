@@ -634,13 +634,14 @@ class StorageController {
         targetWrShk,
         prunitId,
         quantity,
+        productQnt,
         conditionState,
         expirationDate,
         id_sklad
       } = req.body;
 
       // Проверяем обязательные параметры
-      if (!productId || !sourceLocationId || !targetLocationId || !prunitId || !quantity) {
+      if (!productId || !sourceLocationId || !targetLocationId || !prunitId || !quantity || !productQnt) {
         logger.warn('Отсутствуют обязательные параметры');
         return res.status(400).json({
           success: false,
@@ -658,6 +659,7 @@ class StorageController {
         targetLocationId,
         targetWrShk,
         prunitId,
+        productQnt:parseFloat(productQnt),
         quantity: parseFloat(quantity),
         conditionState,
         expirationDate,

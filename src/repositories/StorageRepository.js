@@ -1695,6 +1695,7 @@ class StorageRepository {
         conditionState,
         expirationDate,
         executor,
+        productQnt,
         isFullMove,
         id_sklad
       } = params;
@@ -1833,7 +1834,7 @@ class StorageRepository {
 
           await new sql.Request(transaction)
             .input('newQuantity', newTargetQuantity)
-            .input('productQnt', parseFloat(targetItem.Product_QNT) + requestedQuantity)
+            .input('productQnt', productQnt)
             .input('executor', executor)
             .input('id', targetItem.ID)
             .input('nameWrShk', locationName)
@@ -1858,7 +1859,7 @@ class StorageRepository {
              WR_SHK, id_scklad, Condition_State, Expiration_Date, Executor, Create_Date,
              name_wr_shk)
             VALUES
-            (@newId, @name, @article, @shk, @quantity, @quantity, @prunitName, @prunitId,
+            (@newId, @name, @article, @shk, @productQnt, @quantity, @prunitName, @prunitId,
              @wrShk, @idScklad, @conditionState, @expirationDate, @executor, GETDATE(),
              @nameWrShk)
           `;
@@ -1869,6 +1870,7 @@ class StorageRepository {
             .input('article', productId)
             .input('shk', sourceItem.SHK)
             .input('quantity', requestedQuantity)
+            .input('productQnt', productQnt)
             .input('prunitName', sourceItem.Prunit_Name)
             .input('prunitId', prunitId)
             .input('wrShk', actualTargetWrShk)
@@ -1884,7 +1886,7 @@ class StorageRepository {
             Name: sourceItem.Name,
             Article: productId,
             SHK: sourceItem.SHK,
-            Product_QNT: requestedQuantity,
+            Product_QNT: productQnt,
             Place_QNT: requestedQuantity,
             Prunit_Name: sourceItem.Prunit_Name,
             Prunit_Id: prunitId,

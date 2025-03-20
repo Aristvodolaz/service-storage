@@ -813,7 +813,7 @@ class StorageService {
       logger.info('Параметры:', JSON.stringify(params));
 
       // Проверяем обязательные параметры
-      const requiredParams = ['productId', 'sourceLocationId', 'targetLocationId', 'prunitId', 'quantity', 'executor'];
+      const requiredParams = ['productId', 'sourceLocationId', 'targetLocationId', 'prunitId', 'quantity', 'executor', 'productQnt'];
       for (const param of requiredParams) {
         if (!params[param]) {
           logger.warn(`Отсутствует обязательный параметр: ${param}`);
@@ -852,6 +852,7 @@ class StorageService {
         targetWrShk: params.targetWrShk,
         prunitId: params.prunitId,
         quantity,
+        productQnt: params.productQnt,
         conditionState: params.conditionState,
         expirationDate: params.expirationDate,
         executor: params.executor,
