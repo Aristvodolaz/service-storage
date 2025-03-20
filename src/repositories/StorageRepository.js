@@ -2119,7 +2119,9 @@ class StorageRepository {
           expirationDate: item.Expiration_Date,
           createDate: item.Create_Date,
           updateDate: item.Update_Date,
-          executor: item.Executor
+          executor: item.Executor,
+          reason: item.reason,
+          name_wr_shk: item.name_wr_shk
         })),
         total,
         limit,
