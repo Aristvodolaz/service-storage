@@ -523,16 +523,30 @@ class StorageRepository {
 
       const item = result.recordset[0];
 
-      // Проверяем достаточное количество
+      // Получаем количество в упаковке и общее количество упаковок
+      const unitsPerPack = parseFloat(item.product_qnt) || 0;
       const currentQuantity = parseFloat(item.place_qnt) || 0;
-      const requestedQuantity = parseFloat(quantity) || 0;
+      const requestedPacks = parseFloat(quantity) || 0;  // теперь quantity - это количество упаковок
+      const actualRequestedQuantity = requestedPacks * unitsPerPack;  // общее количество штук для снятия
 
-      if (currentQuantity < requestedQuantity) {
-        logger.warn(`Недостаточное количество товара: доступно ${currentQuantity}, запрошено ${requestedQuantity}`);
-        return { error: 'insufficient_quantity', available: currentQuantity };
+      logger.info('Расчет количества:', {
+        unitsPerPack,
+        currentQuantity,
+        requestedPacks,
+        actualRequestedQuantity
+      });
+
+      if (currentQuantity < actualRequestedQuantity) {
+        logger.warn(`Недостаточное количество товара: доступно ${currentQuantity} (${Math.floor(currentQuantity/unitsPerPack)} упаковок), запрошено ${actualRequestedQuantity} (${requestedPacks} упаковок)`);
+        return { 
+          error: 'insufficient_quantity', 
+          available: currentQuantity,
+          availablePacks: Math.floor(currentQuantity/unitsPerPack),
+          unitsPerPack
+        };
       }
 
-      const newQuantity = currentQuantity - requestedQuantity;
+      const newQuantity = currentQuantity - actualRequestedQuantity;
 
       if (newQuantity <= 0) {
         // Если количество становится нулевым или отрицательным, устанавливаем place_qnt = 0
@@ -560,7 +574,6 @@ class StorageRepository {
         await updateRequest.query(updateQuery);
       } else {
         // Обновляем количество товара в ячейке
-        // Вычитаем только из place_qnt, product_qnt остается прежним
         let updateQuery = `
           UPDATE [SPOe_rc].[dbo].[x_Storage_Full_Info]
           SET Place_QNT = @newQuantity,
@@ -584,18 +597,7 @@ class StorageRepository {
         await updateRequest.query(updateQuery);
       }
 
-      // Логируем операцию
-      await this.logStorageOperation({
-        operationType: 'изъятие',
-        productId,
-        prunitId,
-        fromLocationId: locationId,
-        toLocationId: null,
-        quantity: requestedQuantity,
-        conditionState: item.condition_state || 'кондиция',
-        executor
-      });
-
+      // Удаляем логирование операции
       return {
         locationId: locationId,
         prunitId: prunitId,
@@ -605,9 +607,12 @@ class StorageRepository {
         conditionState: item.condition_state,
         previousQuantity: currentQuantity,
         newQuantity: newQuantity,
-        pickedQuantity: requestedQuantity,
+        pickedQuantity: actualRequestedQuantity,
+        requestedQuantity,
+        unitsPerPack,
+        pickedPacks: requestedPacks,
         isDeleted: newQuantity <= 0,
-        productQnt: parseFloat(item.product_qnt) || 0
+        productQnt: unitsPerPack
       };
     } catch (error) {
       logger.error('Error in pickFromLocation:', error);
@@ -658,16 +663,30 @@ class StorageRepository {
 
       const item = result.recordset[0];
 
-      // Проверяем достаточное количество
-      const currentQuantity = parseFloat(item.Product_QNT) || 0;
+      // Получаем количество в упаковке и общее количество упаковок
+      const unitsPerPack = parseFloat(item.Product_QNT) || 0;
+      const currentQuantity = parseFloat(item.Place_QNT) || 0;
       const requestedQuantity = parseFloat(quantity) || 0;
+      const actualRequestedQuantity = requestedQuantity * unitsPerPack; // Умножаем количество упаковок на количество в упаковке
 
-      if (currentQuantity < requestedQuantity) {
-        logger.warn(`Недостаточное количество товара: доступно ${currentQuantity}, запрошено ${requestedQuantity}`);
-        return { error: 'insufficient_quantity', available: currentQuantity };
+      logger.info('Расчет количества:', {
+        unitsPerPack,
+        currentQuantity,
+        requestedQuantity,
+        actualRequestedQuantity
+      });
+
+      if (currentQuantity < actualRequestedQuantity) {
+        logger.warn(`Недостаточное количество товара: доступно ${currentQuantity}, запрошено ${actualRequestedQuantity}`);
+        return { 
+          error: 'insufficient_quantity', 
+          available: currentQuantity,
+          availablePacks: Math.floor(currentQuantity/unitsPerPack),
+          unitsPerPack
+        };
       }
 
-      const newQuantity = currentQuantity - requestedQuantity;
+      const newQuantity = currentQuantity - actualRequestedQuantity;
 
       if (newQuantity <= 0) {
         // Если количество становится нулевым или отрицательным, удаляем запись
@@ -701,8 +720,7 @@ class StorageRepository {
         // Обновляем количество товара в ячейке
         let updateQuery = `
           UPDATE [SPOe_rc].[dbo].[x_Storage_Full_Info]
-          SET Product_QNT = @productQnt,
-              Place_QNT = @newQuantity,
+          SET Place_QNT = @newQuantity,
               Update_Date = GETDATE(),
               Executor = @executor
           WHERE article = @productId
@@ -722,7 +740,6 @@ class StorageRepository {
           .input('prunitId', prunitId)
           .input('locationId', locationId)
           .input('newQuantity', newQuantity)
-          .input('productQnt', productQnt)
           .input('executor', executor);
 
         if (sklad_id) {
@@ -732,30 +749,23 @@ class StorageRepository {
         await updateRequest.query(updateQuery);
       }
 
-      // Логируем операцию
-      await this.logStorageOperation({
-        operationType: 'изъятие',
-        productId,
-        prunitId,
-        fromLocationId: locationId,
-        toLocationId: null,
-        quantity: requestedQuantity,
-        conditionState: item.Condition_State || 'кондиция',
-        executor
-      });
-
+      // Удаляем логирование операции и сразу возвращаем результат
       return {
         locationId: locationId,
         prunitId: prunitId,
         name: item.Name,
         article: item.Article,
-        shk: item.WR_SHK,
+        shk: item.SHK,
         conditionState: item.Condition_State,
         previousQuantity: currentQuantity,
         newQuantity: newQuantity,
-        pickedQuantity: requestedQuantity,
+        pickedQuantity: actualRequestedQuantity,
+        requestedQuantity,
+        unitsPerPack,
+        pickedPacks: Math.ceil(requestedQuantity / unitsPerPack),
         isDeleted: newQuantity <= 0
       };
+
     } catch (error) {
       logger.error('Error in pickFromLocationBySkladId:', error);
       throw error;
