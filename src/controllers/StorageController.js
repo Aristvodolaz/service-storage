@@ -639,11 +639,12 @@ class StorageController {
         conditionState,
         expirationDate,
         id_sklad,
-        isFullMove
+        isFullMove,
+        executor
       } = req.body;
 
       // Проверяем обязательные параметры
-      if (!productId || !sourceLocationId || !targetLocationId || !prunitId || !quantity || !productQnt) {
+      if (!productId || !sourceLocationId || !targetLocationId || !prunitId || !quantity || !productQnt || !executor) {
         logger.warn('Отсутствуют обязательные параметры');
         return res.status(400).json({
           success: false,
@@ -651,11 +652,7 @@ class StorageController {
         });
       }
 
-      // Получаем информацию о пользователе из JWT
-      const executor = req.user ? req.user.username : 'system';
-
       // Если isFullMove не указан явно, определяем его на основе количества
-      // Запрашиваем сначала текущее количество товара в исходной ячейке
       let isFullMoveValue = isFullMove;
       
       if (isFullMoveValue === undefined) {

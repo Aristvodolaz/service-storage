@@ -722,7 +722,7 @@ class StorageRepository {
           .input('prunitId', prunitId)
           .input('locationId', locationId)
           .input('newQuantity', newQuantity)
-          .inpu('productQnt', productQnt)
+          .input('productQnt', productQnt)
           .input('executor', executor);
 
         if (sklad_id) {
@@ -1698,8 +1698,8 @@ class StorageRepository {
         productQnt,
         isFullMove,
         id_sklad,
-      reason
-          } = params;
+        reason
+      } = params;
 
       // Используем targetWrShk, если он указан, иначе используем targetLocationId
       const actualTargetWrShk = targetWrShk || targetLocationId;
@@ -1713,7 +1713,7 @@ class StorageRepository {
       }
 
       // Проверяем обязательные параметры
-      if (!productId || !sourceLocationId || !actualTargetWrShk || !prunitId) {
+      if (!productId || !sourceLocationId || !actualTargetWrShk || !prunitId || !executor) {
         return {
           error: 'missing_params',
           msg: 'Не указаны обязательные параметры для перемещения'
@@ -1725,7 +1725,7 @@ class StorageRepository {
         SELECT name
         FROM [SPOe_rc].[dbo].[x_Storage_Scklads]
         WHERE shk = @wrShk
-        AND wr_house = @idScklad
+        AND (@idScklad IS NULL OR wr_house = @idScklad)
       `;
 
       const locationResult = await this.pool.request()
@@ -1856,6 +1856,8 @@ class StorageRepository {
           const maxId = maxIdResult.recordset[0].maxId || 0;
           const newId = (maxId + 1).toString();
 
+          // Удалено определение useConditionState и useExpirationDate
+
           const insertTargetQuery = `
             INSERT INTO [SPOe_rc].[dbo].[x_Storage_Full_Info]
             (ID, Name, Article, SHK, Product_QNT, Place_QNT, Prunit_Name, Prunit_Id,
@@ -1879,8 +1881,8 @@ class StorageRepository {
             .input('reason', reason)
             .input('wrShk', actualTargetWrShk)
             .input('idScklad', id_sklad || sourceItem.id_scklad)
-            .input('conditionState', useConditionState)
-            .input('expirationDate', useExpirationDate)
+            .input('conditionState', conditionState || sourceItem.Condition_State)
+            .input('expirationDate', expirationDate || sourceItem.Expiration_Date)
             .input('executor', executor)
             .input('nameWrShk', locationName)
             .query(insertTargetQuery);
@@ -1897,8 +1899,9 @@ class StorageRepository {
             Prunit_Id: prunitId,
             WR_SHK: actualTargetWrShk,
             id_scklad: id_sklad || sourceItem.id_scklad,
-            Condition_State: useConditionState,
-            Expiration_Date: useExpirationDate
+            Condition_State: conditionState || sourceItem.Condition_State,
+            Expiration_Date: expirationDate || sourceItem.Expiration_Date,
+            Executor: executor
           };
         }
 
@@ -1916,19 +1919,21 @@ class StorageRepository {
             newQuantity: newSourceQuantity,
             reason: reason,
             prunitId: sourceItem.Prunit_Id,
-            prunitName: sourceItem.Prunit_Name
+            prunitName: sourceItem.Prunit_Name,
+            executor: executor
           },
           targetItem: {
             id: targetItem.ID,
             name: targetItem.Name,
             article: targetItem.Article,
             shk: targetItem.SHK,
-            reason:reason,
+            reason: reason,
             previousQuantity: isNewRecord ? 0 : parseFloat(targetItem.Place_QNT) || 0,
             newQuantity: isNewRecord ? requestedQuantity : (parseFloat(targetItem.Place_QNT) || 0) + requestedQuantity,
             prunitId: targetItem.Prunit_Id,
             prunitName: targetItem.Prunit_Name,
-            isNewRecord
+            isNewRecord,
+            executor: executor
           },
           conditionState: targetItem.Condition_State,
           expirationDate: targetItem.Expiration_Date,
@@ -1940,6 +1945,7 @@ class StorageRepository {
         throw error;
       }
     } catch (error) {
+      logger.error('Ошибка при перемещении товара:', error);
       throw error;
     }
   }
