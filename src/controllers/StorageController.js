@@ -635,9 +635,11 @@ class StorageController {
         prunitId,
         quantity,
         productQnt,
+        reason,
         conditionState,
         expirationDate,
-        id_sklad
+        id_sklad,
+        isFullMove
       } = req.body;
 
       // Проверяем обязательные параметры
@@ -652,6 +654,37 @@ class StorageController {
       // Получаем информацию о пользователе из JWT
       const executor = req.user ? req.user.username : 'system';
 
+      // Если isFullMove не указан явно, определяем его на основе количества
+      // Запрашиваем сначала текущее количество товара в исходной ячейке
+      let isFullMoveValue = isFullMove;
+      
+      if (isFullMoveValue === undefined) {
+        try {
+          // Запрашиваем информацию о товаре в ячейке, чтобы определить, является ли перемещение полным
+          const items = await storageService.getLocationItems(sourceLocationId, id_sklad);
+          if (items.success && items.data) {
+            // Ищем товар с нужным productId и prunitId
+            const sourceItem = items.data.find(item => 
+              item.article === productId && 
+              item.units.some(unit => unit.prunitId === prunitId)
+            );
+            
+            if (sourceItem) {
+              const unit = sourceItem.units.find(u => u.prunitId === prunitId);
+              if (unit) {
+                // Если количество перемещаемого товара равно количеству в ячейке, это полное перемещение
+                isFullMoveValue = Math.abs(parseFloat(quantity) - parseFloat(unit.quantity)) < 0.001;
+                logger.info(`Определено значение isFullMove: ${isFullMoveValue}, quantity: ${quantity}, unit.quantity: ${unit.quantity}`);
+              }
+            }
+          }
+        } catch (error) {
+          logger.warn('Ошибка при определении isFullMove:', error);
+          // В случае ошибки считаем, что это не полное перемещение
+          isFullMoveValue = false;
+        }
+      }
+
       // Вызываем сервис для перемещения товара
       const result = await storageService.moveItemBetweenLocations({
         productId,
@@ -659,12 +692,14 @@ class StorageController {
         targetLocationId,
         targetWrShk,
         prunitId,
-        productQnt:parseFloat(productQnt),
+        productQnt: parseFloat(productQnt),
         quantity: parseFloat(quantity),
         conditionState,
         expirationDate,
         executor,
-        id_sklad
+        id_sklad,
+        reason,
+        isFullMove: isFullMoveValue
       });
 
       // Обрабатываем результат

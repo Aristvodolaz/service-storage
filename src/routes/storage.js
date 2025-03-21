@@ -446,7 +446,7 @@ router.post('/:productId/buffer/out', [
  * /api/storage/{productId}/buffer/move:
  *   post:
  *     summary: Перемещение товара между буферными ячейками
- *     description: Перемещает товар между ячейками с проверкой существования целевой ячейки в справочнике складов. При перемещении проверяется соответствие wr_shk и id_sklad в таблице x_Storage_Scklads, и добавляется значение name_wr_shk из этой таблицы.
+ *     description: Перемещает товар между ячейками с проверкой существования целевой ячейки в справочнике складов. При перемещении проверяется соответствие wr_shk и id_sklad в таблице x_Storage_Scklads, и добавляется значение name_wr_shk из этой таблицы. При полном перемещении (isFullMove=true или quantity равно всему количеству в ячейке) параметры срока годности, состояния и вложенности берутся из исходной ячейки и не запрашиваются.
  *     tags: [Склад]
  *     parameters:
  *       - in: path
@@ -493,14 +493,14 @@ router.post('/:productId/buffer/out', [
  *                 description: ID склада (должен соответствовать wr_house в x_Storage_Scklads)
  *               conditionState:
  *                 type: string
- *                 description: Состояние товара
+ *                 description: Состояние товара (запрашивается только при частичном перемещении)
  *               expirationDate:
  *                 type: string
  *                 format: date-time
- *                 description: Срок годности
+ *                 description: Срок годности (запрашивается только при частичном перемещении)
  *               isFullMove:
  *                 type: boolean
- *                 description: Флаг полного перемещения товара
+ *                 description: Флаг полного перемещения товара. Если true или не указан, но количество равно всему количеству в ячейке, то для conditionState и expirationDate используются значения из исходной ячейки.
  *     responses:
  *       200:
  *         description: Товар успешно перемещен
@@ -571,6 +571,7 @@ router.post('/:productId/buffer/move', [
   body('conditionState').optional().isIn(['кондиция', 'некондиция']),
   body('expirationDate').optional().isISO8601(),
   body('id_sklad').optional().isString().trim(),
+  body('isFullMove').optional().isBoolean(),
   validate
 ], storageController.moveItemBetweenLocations);
 

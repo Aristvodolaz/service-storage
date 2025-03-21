@@ -852,11 +852,12 @@ class StorageService {
         targetWrShk: params.targetWrShk,
         prunitId: params.prunitId,
         quantity,
+        reason: params.reason,
         productQnt: params.productQnt,
         conditionState: params.conditionState,
         expirationDate: params.expirationDate,
         executor: params.executor,
-        isFullMove: params.isFullMove === true,
+        isFullMove: params.isFullMove,
         id_sklad: params.id_sklad
       });
 

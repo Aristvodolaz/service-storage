@@ -1679,7 +1679,7 @@ class StorageRepository {
   }
 
   /**
-   * Перемещение товара между ячейками (улучшенная версия)
+   * Перемещение товара между ячейками (версия 2)
    * @param {Object} params - Параметры перемещения
    * @returns {Promise<Object>} - Результат перемещения
    */
@@ -1697,8 +1697,9 @@ class StorageRepository {
         executor,
         productQnt,
         isFullMove,
-        id_sklad
-      } = params;
+        id_sklad,
+      reason
+          } = params;
 
       // Используем targetWrShk, если он указан, иначе используем targetLocationId
       const actualTargetWrShk = targetWrShk || targetLocationId;
@@ -1828,13 +1829,15 @@ class StorageRepository {
                 Product_QNT = @productQnt,
                 Update_Date = GETDATE(),
                 Executor = @executor,
-                name_wr_shk = @nameWrShk
+                name_wr_shk = @nameWrShk,
+                reason = @reason
             WHERE ID = @id
           `;
 
           await new sql.Request(transaction)
             .input('newQuantity', newTargetQuantity)
             .input('productQnt', productQnt)
+            .input('reason', reason)
             .input('executor', executor)
             .input('id', targetItem.ID)
             .input('nameWrShk', locationName)
@@ -1857,11 +1860,11 @@ class StorageRepository {
             INSERT INTO [SPOe_rc].[dbo].[x_Storage_Full_Info]
             (ID, Name, Article, SHK, Product_QNT, Place_QNT, Prunit_Name, Prunit_Id,
              WR_SHK, id_scklad, Condition_State, Expiration_Date, Executor, Create_Date,
-             name_wr_shk)
+             name_wr_shk, reason)
             VALUES
             (@newId, @name, @article, @shk, @productQnt, @quantity, @prunitName, @prunitId,
              @wrShk, @idScklad, @conditionState, @expirationDate, @executor, GETDATE(),
-             @nameWrShk)
+             @nameWrShk, @reason)
           `;
 
           await new sql.Request(transaction)
@@ -1873,10 +1876,11 @@ class StorageRepository {
             .input('productQnt', productQnt)
             .input('prunitName', sourceItem.Prunit_Name)
             .input('prunitId', prunitId)
+            .input('reason', reason)
             .input('wrShk', actualTargetWrShk)
             .input('idScklad', id_sklad || sourceItem.id_scklad)
-            .input('conditionState', conditionState || sourceItem.Condition_State || 'кондиция')
-            .input('expirationDate', expirationDate ? new Date(expirationDate) : sourceItem.Expiration_Date)
+            .input('conditionState', useConditionState)
+            .input('expirationDate', useExpirationDate)
             .input('executor', executor)
             .input('nameWrShk', locationName)
             .query(insertTargetQuery);
@@ -1886,14 +1890,15 @@ class StorageRepository {
             Name: sourceItem.Name,
             Article: productId,
             SHK: sourceItem.SHK,
+            reason: reason,
             Product_QNT: productQnt,
             Place_QNT: requestedQuantity,
             Prunit_Name: sourceItem.Prunit_Name,
             Prunit_Id: prunitId,
             WR_SHK: actualTargetWrShk,
             id_scklad: id_sklad || sourceItem.id_scklad,
-            Condition_State: conditionState || sourceItem.Condition_State || 'кондиция',
-            Expiration_Date: expirationDate ? new Date(expirationDate) : sourceItem.Expiration_Date
+            Condition_State: useConditionState,
+            Expiration_Date: useExpirationDate
           };
         }
 
@@ -1909,6 +1914,7 @@ class StorageRepository {
             shk: sourceItem.SHK,
             previousQuantity: sourceQuantity,
             newQuantity: newSourceQuantity,
+            reason: reason,
             prunitId: sourceItem.Prunit_Id,
             prunitName: sourceItem.Prunit_Name
           },
@@ -1917,6 +1923,7 @@ class StorageRepository {
             name: targetItem.Name,
             article: targetItem.Article,
             shk: targetItem.SHK,
+            reason:reason,
             previousQuantity: isNewRecord ? 0 : parseFloat(targetItem.Place_QNT) || 0,
             newQuantity: isNewRecord ? requestedQuantity : (parseFloat(targetItem.Place_QNT) || 0) + requestedQuantity,
             prunitId: targetItem.Prunit_Id,
@@ -1924,7 +1931,8 @@ class StorageRepository {
             isNewRecord
           },
           conditionState: targetItem.Condition_State,
-          expirationDate: targetItem.Expiration_Date
+          expirationDate: targetItem.Expiration_Date,
+          isFullMove: isFullMove
         };
       } catch (error) {
         // В случае ошибки откатываем транзакцию
