@@ -624,167 +624,116 @@ class StorageRepository {
    * Снятие товара из ячейки с учетом поля sklad_id
    */
   async pickFromLocationBySkladId(data) {
+    const { productId, locationId, prunitId, quantity, executor, sklad_id } = data;
+    const client = await this.pool.connect();
+
     try {
-      const { productId, locationId, prunitId, quantity, executor, sklad_id, productQnt } = data;
+      await client.query('BEGIN');
 
-      logger.info('Забор товара из ячейки по sklad_id:', JSON.stringify(data));
-
-      // Проверяем наличие товара в указанной ячейке
-      let checkQuery = `
-        SELECT ID, Name, Article, SHK, Prunit_Id, Prunit_Name, Product_QNT, Place_QNT, id_scklad, Condition_State
-        FROM [SPOe_rc].[dbo].[x_Storage_Full_Info]
-        WHERE article = @productId
-          AND Prunit_Id = @prunitId
-          AND WR_SHK = @locationId
+      // Получаем текущую запись
+      const getQuery = `
+        SELECT * FROM x_Storage_Full_Info 
+        WHERE WR_SHK = $1 
+        AND prunit_id = $2 
+        AND article = $3 
+        AND id_sklad = $4
+        FOR UPDATE
       `;
+      const getResult = await client.query(getQuery, [locationId, prunitId, productId, sklad_id]);
 
-      // Если указан sklad_id, добавляем условие
-      if (sklad_id) {
-        checkQuery += ` AND id_scklad = @sklad_id`;
-      }
-
-      logger.info('SQL запрос для проверки наличия товара:', checkQuery);
-
-      const checkRequest = this.pool.request()
-        .input('productId', productId)
-        .input('prunitId', prunitId)
-        .input('locationId', locationId);
-
-      if (sklad_id) {
-        checkRequest.input('sklad_id', sklad_id);
-      }
-
-      const result = await checkRequest.query(checkQuery);
-
-      if (result.recordset.length === 0) {
-        logger.warn('Товар не найден в указанной ячейке');
+      if (getResult.rows.length === 0) {
+        await client.query('ROLLBACK');
         return null;
       }
 
-      const item = result.recordset[0];
-
-      // Получаем количество в упаковке и общее количество упаковок
-      const unitsPerPack = parseFloat(item.Product_QNT) || 0;
-      const currentQuantity = parseFloat(item.Place_QNT) || 0;
-      const requestedQuantity = parseFloat(quantity) || 0;
-      const actualRequestedQuantity = requestedQuantity;
-
-      logger.info('Расчет количества:', {
-        unitsPerPack,
-        currentQuantity,
-        requestedQuantity,
-        actualRequestedQuantity
-      });
+      const currentRecord = getResult.rows[0];
+      const currentQuantity = parseFloat(currentRecord.Place_QNT);
+      const actualRequestedQuantity = parseFloat(quantity) * parseFloat(currentRecord.productQnt);
 
       if (currentQuantity < actualRequestedQuantity) {
-        logger.warn(`Недостаточное количество товара: доступно ${currentQuantity}, запрошено ${actualRequestedQuantity}`);
-        return { 
-          error: 'insufficient_quantity', 
+        await client.query('ROLLBACK');
+        return {
+          error: 'insufficient_quantity',
           available: currentQuantity,
-          availablePacks: currentQuantity,
-          unitsPerPack: 1
+          availablePacks: currentQuantity / currentRecord.productQnt,
+          unitsPerPack: currentRecord.productQnt
         };
       }
 
       const newQuantity = currentQuantity - actualRequestedQuantity;
 
       if (newQuantity <= 0) {
-        // Если количество становится нулевым или отрицательным, удаляем запись
-        logger.info('Количество товара стало нулевым, удаляем запись');
-
-        let deleteQuery = `
-          DELETE FROM [SPOe_rc].[dbo].[x_Storage_Full_Info]
-          WHERE article = @productId
-          AND Prunit_Id = @prunitId
-          AND WR_SHK = @locationId
+        // Если новое количество <= 0, удаляем запись
+        const deleteQuery = `
+          DELETE FROM x_Storage_Full_Info 
+          WHERE WR_SHK = $1 
+          AND prunit_id = $2 
+          AND article = $3 
+          AND id_sklad = $4
         `;
+        await client.query(deleteQuery, [locationId, prunitId, productId, sklad_id]);
 
-        // Если указан sklad_id, добавляем условие
-        if (sklad_id) {
-          deleteQuery += ` AND id_scklad = @sklad_id`;
-        }
+        // Логируем операцию
+        await this.logStorageOperation({
+          productId,
+          locationId,
+          prunitId,
+          quantity: -actualRequestedQuantity,
+          executor,
+          sklad_id,
+          operationType: 'pick',
+          isDeleted: true
+        });
 
-        logger.info('SQL запрос для удаления записи:', deleteQuery);
-
-        const deleteRequest = this.pool.request()
-          .input('productId', productId)
-          .input('prunitId', prunitId)
-          .input('locationId', locationId);
-
-        if (sklad_id) {
-          deleteRequest.input('sklad_id', sklad_id);
-        }
-
-        await deleteRequest.query(deleteQuery);
-
+        await client.query('COMMIT');
         return {
           success: true,
-          locationId: locationId,
-          prunitId: prunitId,
-          name: item.Name,
-          article: item.Article,
-          shk: item.SHK,
-          conditionState: item.Condition_State,
-          previousQuantity: currentQuantity,
-          newQuantity: 0,
-          pickedQuantity: actualRequestedQuantity,
-          requestedQuantity,
-          unitsPerPack,
-          pickedPacks: Math.ceil(requestedQuantity / unitsPerPack),
+          locationId,
+          prunitId,
+          productId,
+          quantity: 0,
           isDeleted: true
         };
       } else {
-        // Обновляем количество товара в ячейке
-        let updateQuery = `
-          UPDATE [SPOe_rc].[dbo].[x_Storage_Full_Info]
-          SET Place_QNT = @newQuantity,
-              Update_Date = GETDATE(),
-              Executor = @executor
-          WHERE article = @productId
-          AND Prunit_Id = @prunitId
-          AND WR_SHK = @locationId
+        // Обновляем количество
+        const updateQuery = `
+          UPDATE x_Storage_Full_Info 
+          SET Place_QNT = $1,
+              last_updated = CURRENT_TIMESTAMP
+          WHERE WR_SHK = $2 
+          AND prunit_id = $3 
+          AND article = $4 
+          AND id_sklad = $5
         `;
+        await client.query(updateQuery, [newQuantity, locationId, prunitId, productId, sklad_id]);
 
-        // Если указан sklad_id, добавляем условие
-        if (sklad_id) {
-          updateQuery += ` AND id_scklad = @sklad_id`;
-        }
+        // Логируем операцию
+        await this.logStorageOperation({
+          productId,
+          locationId,
+          prunitId,
+          quantity: -actualRequestedQuantity,
+          executor,
+          sklad_id,
+          operationType: 'pick',
+          isDeleted: false
+        });
 
-        logger.info('SQL запрос для обновления количества:', updateQuery);
-
-        const updateRequest = this.pool.request()
-          .input('productId', productId)
-          .input('prunitId', prunitId)
-          .input('locationId', locationId)
-          .input('newQuantity', newQuantity)
-          .input('executor', executor);
-
-        if (sklad_id) {
-          updateRequest.input('sklad_id', sklad_id);
-        }
-
-        await updateRequest.query(updateQuery);
-
+        await client.query('COMMIT');
         return {
           success: true,
-          locationId: locationId,
-          prunitId: prunitId,
-          name: item.Name,
-          article: item.Article,
-          shk: item.SHK,
-          conditionState: item.Condition_State,
-          previousQuantity: currentQuantity,
-          newQuantity: newQuantity,
-          pickedQuantity: actualRequestedQuantity,
-          requestedQuantity,
-          unitsPerPack,
-          pickedPacks: Math.ceil(requestedQuantity / unitsPerPack),
+          locationId,
+          prunitId,
+          productId,
+          quantity: newQuantity,
           isDeleted: false
         };
       }
     } catch (error) {
-      logger.error('Error in pickFromLocationBySkladId:', error);
+      await client.query('ROLLBACK');
       throw error;
+    } finally {
+      client.release();
     }
   }
 
