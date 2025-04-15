@@ -154,7 +154,8 @@ class StorageController {
         article,
         shk,
         sklad_id,
-        productQnt
+        productQnt,
+        reason
       } = req.body;
 
       logger.info('Получен запрос на размещение товара в буфер');
@@ -170,7 +171,8 @@ class StorageController {
         article,
         shk,
         sklad_id,
-        productQnt
+        productQnt,
+        reason
       });
 
       // Проверяем наличие обязательных параметров
@@ -250,7 +252,8 @@ class StorageController {
         article,
         shk,
         sklad_id,
-        productQnt: productQnt ? parseFloat(productQnt) : undefined
+        productQnt: productQnt ? parseFloat(productQnt) : undefined,
+        reason
       });
 
       if (!result.success) {
@@ -396,7 +399,22 @@ class StorageController {
     try {
       const { productId, WR_SHK, prunitId, quantity, executor, sklad_id } = req.body;
 
-      logger.info('Запрос на снятие товара из ячейки с учетом sklad_id:', req.body);
+      logger.info('Запрос на снятие товара из ячейки с учетом sklad_id:', {
+        productId,
+        WR_SHK,
+        prunitId,
+        quantity,
+        executor,
+        sklad_id
+      });
+
+      // Проверяем обязательные параметры
+      if (!productId || !WR_SHK || !prunitId || !quantity || !executor) {
+        return res.status(400).json({
+          success: false,
+          message: 'Не все обязательные параметры указаны'
+        });
+      }
 
       const result = await storageService.pickFromLocationBySkladId({
         productId,
@@ -406,6 +424,21 @@ class StorageController {
         executor,
         sklad_id
       });
+
+      if (!result) {
+        return res.status(404).json({
+          success: false,
+          message: 'Товар не найден в указанной ячейке'
+        });
+      }
+
+      if (result.error === 'insufficient_quantity') {
+        return res.status(400).json({
+          success: false,
+          message: `Недостаточное количество товара: доступно ${result.available}, запрошено ${quantity}`,
+          data: result
+        });
+      }
 
       return res.status(200).json({
         success: true,

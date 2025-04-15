@@ -667,7 +667,7 @@ class StorageRepository {
       const unitsPerPack = parseFloat(item.Product_QNT) || 0;
       const currentQuantity = parseFloat(item.Place_QNT) || 0;
       const requestedQuantity = parseFloat(quantity) || 0;
-      const actualRequestedQuantity = requestedQuantity * unitsPerPack; // Умножаем количество упаковок на количество в упаковке
+      const actualRequestedQuantity = requestedQuantity;
 
       logger.info('Расчет количества:', {
         unitsPerPack,
@@ -681,8 +681,8 @@ class StorageRepository {
         return { 
           error: 'insufficient_quantity', 
           available: currentQuantity,
-          availablePacks: Math.floor(currentQuantity/unitsPerPack),
-          unitsPerPack
+          availablePacks: currentQuantity,
+          unitsPerPack: 1
         };
       }
 
@@ -716,6 +716,23 @@ class StorageRepository {
         }
 
         await deleteRequest.query(deleteQuery);
+
+        return {
+          success: true,
+          locationId: locationId,
+          prunitId: prunitId,
+          name: item.Name,
+          article: item.Article,
+          shk: item.SHK,
+          conditionState: item.Condition_State,
+          previousQuantity: currentQuantity,
+          newQuantity: 0,
+          pickedQuantity: actualRequestedQuantity,
+          requestedQuantity,
+          unitsPerPack,
+          pickedPacks: Math.ceil(requestedQuantity / unitsPerPack),
+          isDeleted: true
+        };
       } else {
         // Обновляем количество товара в ячейке
         let updateQuery = `
@@ -747,25 +764,24 @@ class StorageRepository {
         }
 
         await updateRequest.query(updateQuery);
+
+        return {
+          success: true,
+          locationId: locationId,
+          prunitId: prunitId,
+          name: item.Name,
+          article: item.Article,
+          shk: item.SHK,
+          conditionState: item.Condition_State,
+          previousQuantity: currentQuantity,
+          newQuantity: newQuantity,
+          pickedQuantity: actualRequestedQuantity,
+          requestedQuantity,
+          unitsPerPack,
+          pickedPacks: Math.ceil(requestedQuantity / unitsPerPack),
+          isDeleted: false
+        };
       }
-
-      // Удаляем логирование операции и сразу возвращаем результат
-      return {
-        locationId: locationId,
-        prunitId: prunitId,
-        name: item.Name,
-        article: item.Article,
-        shk: item.SHK,
-        conditionState: item.Condition_State,
-        previousQuantity: currentQuantity,
-        newQuantity: newQuantity,
-        pickedQuantity: actualRequestedQuantity,
-        requestedQuantity,
-        unitsPerPack,
-        pickedPacks: Math.ceil(requestedQuantity / unitsPerPack),
-        isDeleted: newQuantity <= 0
-      };
-
     } catch (error) {
       logger.error('Error in pickFromLocationBySkladId:', error);
       throw error;
@@ -1019,10 +1035,24 @@ class StorageRepository {
       // Если найдена точно такая же запись - обновляем её
       if (checkResult.recordset.length > 0) {
         const record = checkResult.recordset[0];
+        
+        // Если новое количество будет равно 0, удаляем запись
+        if (record.Place_QNT + data.quantity <= 0) {
+          const deleteQuery = `
+            DELETE FROM [SPOe_rc].[dbo].[x_Storage_Full_Info]
+            WHERE ID = @id
+          `;
+
+          await this.pool.request()
+            .input('id', record.ID)
+            .query(deleteQuery);
+
+          return true;
+        }
+
         const updateQuery = `
           UPDATE [SPOe_rc].[dbo].[x_Storage_Full_Info]
-          SET Place_QNT = @quantity,
-              Product_QNT = @productQnt,
+          SET Place_QNT = Place_QNT + @quantity,
               Update_Date = GETDATE(),
               Executor = @executor,
               Condition_State = @conditionState,
@@ -1035,7 +1065,6 @@ class StorageRepository {
         await this.pool.request()
           .input('id', record.ID)
           .input('quantity', data.quantity)
-          .input('productQnt', data.productQnt !== undefined ? data.productQnt : record.Product_QNT)
           .input('executor', data.executor)
           .input('conditionState', data.conditionState)
           .input('expirationDate', data.expirationDate)
