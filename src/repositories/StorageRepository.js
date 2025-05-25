@@ -631,7 +631,8 @@ class StorageRepository {
 
       // Проверяем наличие товара в указанной ячейке
       let checkQuery = `
-        SELECT ID, Name, Article, SHK, Prunit_Id, Prunit_Name, Product_QNT, Place_QNT, id_scklad, Condition_State
+        SELECT ID, Name, Article, SHK, Prunit_Id, Prunit_Name, Product_QNT, Place_QNT, id_scklad, Condition_State,
+               Expiration_Date, Start_Expiration_Date, End_Expiration_Date
         FROM [SPOe_rc].[dbo].[x_Storage_Full_Info]
         WHERE article = @productId
           AND Prunit_Id = @prunitId
@@ -663,6 +664,15 @@ class StorageRepository {
 
       const item = result.recordset[0];
 
+      // Преобразуем формат даты истечения срока годности к формату Start_Expiration_Date
+      let expirationDate = item.Expiration_Date;
+      let startExpirationDate = item.Start_Expiration_Date;
+      
+      // Если есть Start_Expiration_Date, используем его в качестве основной даты истечения срока
+      if (startExpirationDate) {
+        expirationDate = startExpirationDate;
+      }
+
       // Получаем количество в упаковке и общее количество упаковок
       const unitsPerPack = parseFloat(item.Product_QNT) || 0;
       const currentQuantity = parseFloat(item.Place_QNT) || 0;
@@ -677,7 +687,8 @@ class StorageRepository {
         actualUnitsPerPack,
         currentQuantity,
         requestedQuantity,
-        actualRequestedQuantity
+        actualRequestedQuantity,
+        expirationDate
       });
 
       if (currentQuantity < actualRequestedQuantity) {
@@ -729,6 +740,7 @@ class StorageRepository {
           article: item.Article,
           shk: item.SHK,
           conditionState: item.Condition_State,
+          expirationDate: expirationDate,
           previousQuantity: currentQuantity,
           newQuantity: 0,
           pickedQuantity: actualRequestedQuantity,
@@ -769,22 +781,23 @@ class StorageRepository {
 
         await updateRequest.query(updateQuery);
 
-        return {
+      return {
           success: true,
-          locationId: locationId,
-          prunitId: prunitId,
-          name: item.Name,
-          article: item.Article,
-          shk: item.SHK,
-          conditionState: item.Condition_State,
-          previousQuantity: currentQuantity,
-          newQuantity: newQuantity,
-          pickedQuantity: actualRequestedQuantity,
-          requestedQuantity,
+        locationId: locationId,
+        prunitId: prunitId,
+        name: item.Name,
+        article: item.Article,
+        shk: item.SHK,
+        conditionState: item.Condition_State,
+          expirationDate: expirationDate,
+        previousQuantity: currentQuantity,
+        newQuantity: newQuantity,
+        pickedQuantity: actualRequestedQuantity,
+        requestedQuantity,
           unitsPerPack: actualUnitsPerPack,
           pickedPacks: requestedQuantity,
           isDeleted: false
-        };
+      };
       }
     } catch (error) {
       logger.error('Error in pickFromLocationBySkladId:', error);
@@ -1811,12 +1824,25 @@ class StorageRepository {
       const sourceItem = sourceResult.recordset[0];
       const sourceQuantity = parseFloat(sourceItem.Place_QNT) || 0;
       const requestedQuantity = parseFloat(quantity) || 0;
+      const sourceProductQnt = parseFloat(sourceItem.Product_QNT) || 0;
 
+      // Проверяем, что запрошенное количество кратно количеству в упаковке
+      if (requestedQuantity % sourceProductQnt !== 0) {
+        return {
+          error: 'invalid_quantity_multiple',
+          msg: `Количество должно быть кратно ${sourceProductQnt} (количество в упаковке)`,
+          productQnt: sourceProductQnt,
+          requestedQuantity: requestedQuantity
+        };
+      }
+
+      // Проверяем, что запрошенное количество не превышает доступное
       if (sourceQuantity < requestedQuantity) {
         return {
           error: 'insufficient_quantity',
           available: sourceQuantity,
-          msg: `Недостаточное количество товара. Доступно: ${sourceQuantity}, запрошено: ${requestedQuantity}`
+          msg: `Недостаточное количество товара. Доступно: ${sourceQuantity}, запрошено: ${requestedQuantity}`,
+          productQnt: sourceProductQnt
         };
       }
 

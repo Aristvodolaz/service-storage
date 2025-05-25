@@ -747,6 +747,8 @@ class StorageController {
           statusCode = 400;
         } else if (result.error === 'invalid_quantity') {
           statusCode = 400;
+        } else if (result.error === 'invalid_quantity_multiple') {
+          statusCode = 400;
         }
 
         logger.warn(`Ошибка при перемещении товара: ${result.error}, ${result.msg}`);
@@ -754,7 +756,9 @@ class StorageController {
           success: false,
           error: result.error,
           msg: result.msg,
-          available: result.available
+          available: result.available,
+          productQnt: result.productQnt,
+          requestedQuantity: result.requestedQuantity
         });
       }
 
