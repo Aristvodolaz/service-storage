@@ -1869,19 +1869,33 @@ class StorageRepository {
       try {
         // Обновляем количество в исходной ячейке
         const newSourceQuantity = sourceQuantity - requestedQuantity;
-        const updateSourceQuery = `
-          UPDATE [SPOe_rc].[dbo].[x_Storage_Full_Info]
-          SET Place_QNT = @newQuantity,
-              Update_Date = GETDATE(),
-              Executor = @executor
-          WHERE ID = @id
-        `;
+        
+        if (newSourceQuantity <= 0) {
+          // Если количество стало 0 или меньше, удаляем запись
+          const deleteSourceQuery = `
+            DELETE FROM [SPOe_rc].[dbo].[x_Storage_Full_Info]
+            WHERE ID = @id
+          `;
 
-        await new sql.Request(transaction)
-          .input('newQuantity', newSourceQuantity)
-          .input('executor', executor)
-          .input('id', sourceItem.ID)
-          .query(updateSourceQuery);
+          await new sql.Request(transaction)
+            .input('id', sourceItem.ID)
+            .query(deleteSourceQuery);
+        } else {
+          // Иначе обновляем количество
+          const updateSourceQuery = `
+            UPDATE [SPOe_rc].[dbo].[x_Storage_Full_Info]
+            SET Place_QNT = @newQuantity,
+                Update_Date = GETDATE(),
+                Executor = @executor
+            WHERE ID = @id
+          `;
+
+          await new sql.Request(transaction)
+            .input('newQuantity', newSourceQuantity)
+            .input('executor', executor)
+            .input('id', sourceItem.ID)
+            .query(updateSourceQuery);
+        }
 
         let targetItem;
         let isNewRecord = false;
@@ -1905,7 +1919,7 @@ class StorageRepository {
 
           await new sql.Request(transaction)
             .input('newQuantity', newTargetQuantity)
-            .input('productQnt', productQnt)
+            .input('productQnt', sourceProductQnt)  // Use sourceProductQnt instead of productQnt
             .input('reason', reason)
             .input('executor', executor)
             .input('id', targetItem.ID)
