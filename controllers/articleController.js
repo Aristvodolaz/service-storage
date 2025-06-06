@@ -27,7 +27,7 @@ const searchArticleBySHK = async (pool, shk) => {
   logger.info(`Поиск товара по ШК: ${shk}`);
   const query = `
     SELECT *
-    FROM OPENQUERY(OW, 'SELECT id, name, qnt_in_pallet FROM wms.article WHERE PIECE_GTIN = ''@shk'' and article_id_real = id')
+    FROM OPENQUERY(OW, 'SELECT id, name, COALESCE(qnt_in_pallet, 0) as qnt_in_pallet FROM wms.article WHERE (PIECE_GTIN = ''@shk'' or or FPACK_GTIN= ''@shk'') and article_id_real = id')
   `;
   return await executeQuery(pool, query, { shk });
 };
@@ -37,7 +37,7 @@ const searchArticleById = async (pool, article) => {
   logger.info(`Поиск товара по артикулу: ${article}`);
   const query = `
     SELECT *
-    FROM OPENQUERY(OW, 'SELECT id, name, qnt_in_pallet FROM wms.article WHERE ID = ''@article'' and article_id_real = id')
+    FROM OPENQUERY(OW, 'SELECT id, name, COALESCE(qnt_in_pallet, 0) as qnt_in_pallet FROM wms.article WHERE ID = ''@article'' and article_id_real = id')
   `;
   return await executeQuery(pool, query, { article });
 };

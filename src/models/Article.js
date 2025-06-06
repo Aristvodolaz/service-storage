@@ -5,7 +5,7 @@ class Article {
   constructor(data = {}) {
     this.id = data.id || null;
     this.name = data.name || '';
-    this.qnt_in_pallet = data.qnt_in_pallet || 0;
+    this.qnt_in_pallet = data.qnt_in_pallet || 0
   }
 
   /**
@@ -17,7 +17,8 @@ class Article {
     return new Article({
       id: dbData.id,
       name: dbData.name,
-      qnt_in_pallet: dbData.qnt_in_pallet
+      qnt_in_pallet: dbData.qnt_in_pallet || 0
+
     });
   }
 

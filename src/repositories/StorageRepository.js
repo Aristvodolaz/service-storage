@@ -58,7 +58,7 @@ class StorageRepository {
               a.name,
               a.PIECE_GTIN as shk,
               a.article_id_real,
-              a.qnt_in_pallet
+              COALESCE(a.qnt_in_pallet, 0) as qnt_in_pallet
             FROM wms.article a
             WHERE a.PIECE_GTIN = ''${shk}''
             AND a.article_id_real = a.id'
@@ -72,7 +72,7 @@ class StorageRepository {
               a.name,
               a.PIECE_GTIN as shk,
               a.article_id_real,
-              a.qnt_in_pallet
+              COALESCE(a.qnt_in_pallet, 0) as qnt_in_pallet
             FROM wms.article a
             WHERE a.id = ''${article}''
             AND a.article_id_real = a.id'
@@ -461,7 +461,7 @@ class StorageRepository {
             a.name,
             a.PIECE_GTIN as shk,
             a.article_id_real,
-            a.qnt_in_pallet
+            COALESCE(a.qnt_in_pallet, 0) as qnt_in_pallet
           FROM wms.article a
           WHERE CAST(a.id AS VARCHAR) = ''${article}''
           AND a.article_id_real = a.id'
@@ -1882,19 +1882,19 @@ class StorageRepository {
             .query(deleteSourceQuery);
         } else {
           // Иначе обновляем количество
-          const updateSourceQuery = `
-            UPDATE [SPOe_rc].[dbo].[x_Storage_Full_Info]
-            SET Place_QNT = @newQuantity,
-                Update_Date = GETDATE(),
-                Executor = @executor
-            WHERE ID = @id
-          `;
+        const updateSourceQuery = `
+          UPDATE [SPOe_rc].[dbo].[x_Storage_Full_Info]
+          SET Place_QNT = @newQuantity,
+              Update_Date = GETDATE(),
+              Executor = @executor
+          WHERE ID = @id
+        `;
 
-          await new sql.Request(transaction)
-            .input('newQuantity', newSourceQuantity)
-            .input('executor', executor)
-            .input('id', sourceItem.ID)
-            .query(updateSourceQuery);
+        await new sql.Request(transaction)
+          .input('newQuantity', newSourceQuantity)
+          .input('executor', executor)
+          .input('id', sourceItem.ID)
+          .query(updateSourceQuery);
         }
 
         let targetItem;

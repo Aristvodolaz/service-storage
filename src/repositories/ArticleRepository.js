@@ -15,7 +15,7 @@ class ArticleRepository extends BaseRepository {
     logger.info(`Поиск товара по ШК: ${shk}`);
     const query = `
       SELECT * 
-      FROM OPENQUERY(OW, 'SELECT id, name, qnt_in_pallet FROM wms.article WHERE PIECE_GTIN = ''@shk'' and article_id_real = id')
+      FROM OPENQUERY(OW, 'SELECT id, name, COALESCE(qnt_in_pallet, 0) as qnt_in_pallet FROM wms.article WHERE (PIECE_GTIN = ''@shk'' or FPACK_GTIN= ''@shk'') and article_id_real = id')
     `;
     const result = await this.executeQuery(query, { shk });
     return Article.fromDatabaseArray(result);
@@ -30,7 +30,7 @@ class ArticleRepository extends BaseRepository {
     logger.info(`Поиск товара по артикулу: ${articleId}`);
     const query = `
       SELECT * 
-      FROM OPENQUERY(OW, 'SELECT id, name, qnt_in_pallet FROM wms.article WHERE ID = ''@articleId'' and article_id_real = id')
+      FROM OPENQUERY(OW, 'SELECT id, name, COALESCE(qnt_in_pallet, 0) as qnt_in_pallet FROM wms.article WHERE ID = ''@articleId'' and article_id_real = id')
     `;
     const result = await this.executeQuery(query, { articleId });
     return Article.fromDatabaseArray(result);
