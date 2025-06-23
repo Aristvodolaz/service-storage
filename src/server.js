@@ -2,7 +2,7 @@ const app = require('./app');
 const logger = require('./utils/logger');
 
 // Настройка порта
-const port = 3008;
+const port = 3006;
 
 // Запуск сервера
 const server = app.listen(port, () => {
