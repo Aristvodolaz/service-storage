@@ -828,7 +828,8 @@ class StorageRepository {
           condition_state,
           expiration_date,
           start_expiration_date,
-          end_expiration_date
+          end_expiration_date,
+          name_wr_shk
         FROM [SPOe_rc].[dbo].[x_Storage_Full_Info]
         WHERE WR_SHK = @locationId
         AND product_qnt > 0

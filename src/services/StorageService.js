@@ -625,6 +625,7 @@ class StorageService {
           prunitId: item.prunit_id,
           prunitName: item.prunit_name,
           quantity: item.place_qnt,
+          name_wr_shk: item.name_wr_shk,
           productQnt: item.product_qnt,
           conditionState: item.condition_state,
           expirationDate: item.expiration_date
@@ -684,6 +685,7 @@ class StorageService {
           prunitId: item.prunit_id,
           prunitName: item.prunit_name,
           quantity: item.product_qnt,
+          name_wr_shk: item.name_wr_shk,
           conditionState: item.condition_state,
           expirationDate: item.expiration_date
         });
