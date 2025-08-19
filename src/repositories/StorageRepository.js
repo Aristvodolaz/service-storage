@@ -812,35 +812,36 @@ class StorageRepository {
     try {
       logger.info(`Получение списка товаров в ячейке: ${locationId}${id_scklad ? `, склад: ${id_scklad}` : ''}`);
 
-      // Создаем базовый запрос
+      // Создаем базовый запрос с JOIN для получения name_wr_shk
       let query = `
         SELECT
-          id,
-          name,
-          article,
-          shk,
-          prunit_id,
-          prunit_name,
-          product_qnt,
-          place_qnt,
-          id_scklad,
-          wr_shk,
-          condition_state,
-          expiration_date,
-          start_expiration_date,
-          end_expiration_date,
-          name_wr_shk
-        FROM [SPOe_rc].[dbo].[x_Storage_Full_Info]
-        WHERE WR_SHK = @locationId
-        AND product_qnt > 0
+          i.id,
+          i.name,
+          i.article,
+          i.shk,
+          i.prunit_id,
+          i.prunit_name,
+          i.product_qnt,
+          i.place_qnt,
+          i.id_scklad,
+          i.wr_shk,
+          i.condition_state,
+          i.expiration_date,
+          i.start_expiration_date,
+          i.end_expiration_date,
+          s.name as name_wr_shk
+        FROM [SPOe_rc].[dbo].[x_Storage_Full_Info] i
+        LEFT JOIN [SPOe_rc].[dbo].[x_Storage_Scklads] s ON i.wr_shk = s.shk
+        WHERE i.WR_SHK = @locationId
+        AND i.product_qnt > 0
       `;
 
       // Добавляем условие по id_scklad, если оно указано
       if (id_scklad) {
-        query += ` AND id_scklad = @id_scklad`;
+        query += ` AND i.id_scklad = @id_scklad`;
       }
 
-      query += ` ORDER BY name`;
+      query += ` ORDER BY i.name`;
 
       // Создаем параметризованный запрос
       const request = this.pool.request()
@@ -2165,7 +2166,7 @@ class StorageRepository {
    */
   async getAllStorageInfo(params = {}) {
     try {
-      const { limit = 1000, offset = 0, id_sklad } = params;
+      const { limit = 100000, offset = 0, id_sklad } = params;
 
       // Строим базовый запрос
       let countQuery = `
