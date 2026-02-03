@@ -4,6 +4,7 @@ require('dotenv').config({ path: './src/config/data.env' });
 const logger = require('./utils/logger');
 const { notFoundHandler, errorHandler } = require('./middlewares/errorHandler');
 const swagger = require('./config/swagger');
+const operationLogger = require('./middlewares/operationLogger');
 
 // Инициализация приложения
 const app = express();
@@ -24,7 +25,8 @@ app.use((req, res, next) => {
 // Middleware
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
-app.use(logger.logHttpRequest); // Добавляем логирование HTTP запросов
+app.use(logger.logHttpRequest); // Добавляем логирование HTTP запросов в файл
+app.use(operationLogger); // Добавляем логирование операций в БД
 
 // Swagger документация
 app.use('/api-docs', swagger.serve, swagger.setup);
@@ -35,6 +37,7 @@ const prunitRoutes = require('./routes/prunit');
 const authRoutes = require('./routes/auth');
 const queryRoutes = require('./routes/query');
 const storageRoutes = require('./routes/storage');
+const operationLogRoutes = require('./routes/operationLog');
 
 // Регистрация маршрутов
 app.use('/api/search', articleRoutes);
@@ -42,6 +45,7 @@ app.use('/api/searchPrunit', prunitRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/query', queryRoutes);
 app.use('/api/storage', storageRoutes);
+app.use('/api/logs', operationLogRoutes);
 
 // Обработка ошибок 404
 app.use(notFoundHandler);
