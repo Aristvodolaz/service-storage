@@ -211,6 +211,152 @@ class OperationLogRepository extends BaseRepository {
       throw error;
     }
   }
+
+  /**
+   * Получение агрегированных данных для отчетов
+   * @param {Object} filters - Фильтры для поиска
+   * @param {string} groupBy - Тип группировки (hour, day, endpoint, executor, status_code)
+   * @returns {Promise<Array>} - Агрегированные данные
+   */
+  async getAggregatedData(filters = {}, groupBy = 'hour') {
+    try {
+      let whereConditions = [];
+      const params = {};
+
+      if (filters.endpoint) {
+        whereConditions.push('endpoint LIKE @endpoint');
+        params.endpoint = `%${filters.endpoint}%`;
+      }
+
+      if (filters.http_method) {
+        whereConditions.push('http_method = @http_method');
+        params.http_method = filters.http_method;
+      }
+
+      if (filters.executor) {
+        whereConditions.push('executor = @executor');
+        params.executor = filters.executor;
+      }
+
+      if (filters.status_code) {
+        whereConditions.push('status_code = @status_code');
+        params.status_code = filters.status_code;
+      }
+
+      if (filters.operation_result) {
+        whereConditions.push('operation_result = @operation_result');
+        params.operation_result = filters.operation_result;
+      }
+
+      if (filters.date_from) {
+        whereConditions.push('created_at >= @date_from');
+        params.date_from = filters.date_from;
+      }
+
+      if (filters.date_to) {
+        whereConditions.push('created_at <= @date_to');
+        params.date_to = filters.date_to;
+      }
+
+      const whereClause = whereConditions.length > 0 
+        ? 'WHERE ' + whereConditions.join(' AND ') 
+        : '';
+
+      // Определяем поля для группировки и SELECT
+      let groupByClause = '';
+      let selectClause = '';
+
+      switch (groupBy) {
+        case 'hour':
+          selectClause = `
+            DATEPART(year, created_at) as year,
+            DATEPART(month, created_at) as month,
+            DATEPART(day, created_at) as day,
+            DATEPART(hour, created_at) as hour,
+            CAST(created_at as DATE) as date,
+            DATEPART(hour, created_at) as hour_of_day
+          `;
+          groupByClause = `
+            DATEPART(year, created_at),
+            DATEPART(month, created_at),
+            DATEPART(day, created_at),
+            DATEPART(hour, created_at),
+            CAST(created_at as DATE)
+          `;
+          break;
+
+        case 'day':
+          selectClause = `
+            CAST(created_at as DATE) as date,
+            DATEPART(year, created_at) as year,
+            DATEPART(month, created_at) as month,
+            DATEPART(day, created_at) as day
+          `;
+          groupByClause = `
+            CAST(created_at as DATE),
+            DATEPART(year, created_at),
+            DATEPART(month, created_at),
+            DATEPART(day, created_at)
+          `;
+          break;
+
+        case 'endpoint':
+          selectClause = 'endpoint';
+          groupByClause = 'endpoint';
+          break;
+
+        case 'executor':
+          selectClause = 'executor';
+          groupByClause = 'executor';
+          break;
+
+        case 'status_code':
+          selectClause = 'status_code';
+          groupByClause = 'status_code';
+          break;
+
+        case 'method':
+          selectClause = 'http_method';
+          groupByClause = 'http_method';
+          break;
+
+        default:
+          throw new Error(`Неподдерживаемый тип группировки: ${groupBy}`);
+      }
+
+      const query = `
+        SELECT 
+          ${selectClause},
+          COUNT(*) as total_count,
+          SUM(CASE WHEN operation_result = 'success' THEN 1 ELSE 0 END) as success_count,
+          SUM(CASE WHEN operation_result = 'error' THEN 1 ELSE 0 END) as error_count,
+          AVG(CAST(execution_time_ms as FLOAT)) as avg_execution_time,
+          MIN(execution_time_ms) as min_execution_time,
+          MAX(execution_time_ms) as max_execution_time,
+          COUNT(DISTINCT executor) as unique_executors,
+          COUNT(DISTINCT ip_address) as unique_ips
+        FROM x_API_Operation_Logs
+        ${whereClause}
+        GROUP BY ${groupByClause}
+        ORDER BY ${groupBy === 'hour' || groupBy === 'day' ? 'date DESC' : 'total_count DESC'}
+      `;
+
+      logger.debug(`Агрегированный запрос: ${query}`);
+      const result = await this.executeQuery(query, params);
+      
+      // Форматируем результат для удобства использования на фронте
+      return result.map(row => ({
+        ...row,
+        success_rate: row.total_count > 0 
+          ? ((row.success_count / row.total_count) * 100).toFixed(2) 
+          : '0',
+        avg_execution_time: row.avg_execution_time ? Math.round(row.avg_execution_time) : 0
+      }));
+    } catch (error) {
+      logger.error(`Ошибка при получении агрегированных данных: ${error.message}`, { stack: error.stack });
+      throw error;
+    }
+  }
 }
 
 module.exports = new OperationLogRepository();

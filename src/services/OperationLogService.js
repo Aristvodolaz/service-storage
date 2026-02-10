@@ -125,6 +125,78 @@ class OperationLogService {
 
     return filtered;
   }
+
+  /**
+   * Генерация отчета по логам для фронтенда
+   * @param {Object} params - Параметры отчета
+   * @returns {Promise<Object>} - Структурированный отчет
+   */
+  async generateReport(params) {
+    const {
+      date_from,
+      date_to,
+      executor,
+      endpoint,
+      group_by = 'hour',
+      include_details = false
+    } = params;
+
+    try {
+      logger.info(`Генерация отчета с группировкой: ${group_by}`);
+
+      // Базовые фильтры
+      const filters = {};
+      if (date_from) filters.date_from = date_from;
+      if (date_to) filters.date_to = date_to;
+      if (executor) filters.executor = executor;
+      if (endpoint) filters.endpoint = endpoint;
+
+      // Получаем агрегированные данные из репозитория
+      const reportData = await operationLogRepository.getAggregatedData(filters, group_by);
+
+      // Получаем общую статистику
+      const totalLogs = await operationLogRepository.count(filters);
+      const successCount = await operationLogRepository.count({ ...filters, operation_result: 'success' });
+      const errorCount = await operationLogRepository.count({ ...filters, operation_result: 'error' });
+
+      // Дополнительные метрики
+      const avgExecutionTime = reportData.reduce((sum, item) => sum + (item.avg_execution_time || 0), 0) / (reportData.length || 1);
+      const maxExecutionTime = Math.max(...reportData.map(item => item.max_execution_time || 0));
+
+      const report = {
+        summary: {
+          total_operations: totalLogs,
+          successful_operations: successCount,
+          failed_operations: errorCount,
+          success_rate: totalLogs > 0 ? ((successCount / totalLogs) * 100).toFixed(2) : '0',
+          avg_execution_time_ms: Math.round(avgExecutionTime),
+          max_execution_time_ms: maxExecutionTime,
+          period: {
+            from: date_from || 'не указано',
+            to: date_to || 'не указано'
+          },
+          filters: {
+            executor: executor || 'все',
+            endpoint: endpoint || 'все'
+          }
+        },
+        grouped_data: reportData,
+        group_by: group_by
+      };
+
+      // Если нужны детальные логи
+      if (include_details) {
+        const detailedLogs = await operationLogRepository.findAll(filters, 1000, 0);
+        report.details = detailedLogs;
+      }
+
+      logger.info(`Отчет сгенерирован: ${reportData.length} групп, ${totalLogs} операций`);
+      return report;
+    } catch (error) {
+      logger.error(`Ошибка при генерации отчета: ${error.message}`, { stack: error.stack });
+      throw error;
+    }
+  }
 }
 
 module.exports = new OperationLogService();

@@ -99,6 +99,47 @@ class OperationLogController {
       });
     }
   }
+
+  /**
+   * Получение отчета по логам для фронтенда
+   * Возвращает структурированные данные для построения отчетов и графиков
+   * @param {Object} req - HTTP запрос
+   * @param {Object} res - HTTP ответ
+   */
+  async getReport(req, res) {
+    try {
+      const {
+        date_from,
+        date_to,
+        executor,
+        endpoint,
+        group_by = 'hour', // hour, day, endpoint, executor, status_code
+        include_details = 'false'
+      } = req.query;
+
+      logger.info(`Запрос отчета с параметрами: ${JSON.stringify(req.query)}`);
+
+      const report = await operationLogService.generateReport({
+        date_from,
+        date_to,
+        executor,
+        endpoint,
+        group_by,
+        include_details: include_details === 'true'
+      });
+
+      res.status(200).json({
+        success: true,
+        data: report
+      });
+    } catch (error) {
+      logger.error(`Ошибка при генерации отчета: ${error.message}`, { stack: error.stack });
+      res.status(500).json({
+        success: false,
+        message: `Ошибка при генерации отчета: ${error.message}`
+      });
+    }
+  }
 }
 
 module.exports = new OperationLogController();
