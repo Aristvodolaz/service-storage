@@ -140,6 +140,44 @@ class OperationLogController {
       });
     }
   }
+  /**
+   * Отчет по операциям в зоне хранения
+   * Возвращает количество выполненных операций, сгруппированных по типу операции
+   * @param {Object} req - HTTP запрос
+   * @param {Object} res - HTTP ответ
+   */
+  async getStorageZoneReport(req, res) {
+    try {
+      const {
+        date_from,
+        date_to,
+        executor,
+        group_by = 'endpoint'
+      } = req.query;
+
+      logger.info(`Запрос отчета по зоне хранения: ${JSON.stringify(req.query)}`);
+
+      const report = await operationLogService.generateReport({
+        date_from,
+        date_to,
+        executor,
+        endpoint: '/api/storage',
+        group_by,
+        include_details: false
+      });
+
+      res.status(200).json({
+        success: true,
+        data: report
+      });
+    } catch (error) {
+      logger.error(`Ошибка при генерации отчета по зоне хранения: ${error.message}`, { stack: error.stack });
+      res.status(500).json({
+        success: false,
+        message: `Ошибка при генерации отчета по зоне хранения: ${error.message}`
+      });
+    }
+  }
 }
 
 module.exports = new OperationLogController();

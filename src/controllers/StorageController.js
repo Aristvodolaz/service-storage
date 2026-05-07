@@ -155,7 +155,8 @@ class StorageController {
         shk,
         sklad_id,
         productQnt,
-        reason
+        reason,
+        exPalletType
       } = req.body;
 
       logger.info('Получен запрос на размещение товара в буфер');
@@ -172,7 +173,8 @@ class StorageController {
         shk,
         sklad_id,
         productQnt,
-        reason
+        reason,
+        exPalletType
       });
 
       // Проверяем наличие обязательных параметров
@@ -253,7 +255,8 @@ class StorageController {
         shk,
         sklad_id,
         productQnt: productQnt ? parseFloat(productQnt) : undefined,
-        reason
+        reason,
+        exPalletType
       });
 
       if (!result.success) {
@@ -762,12 +765,15 @@ class StorageController {
         });
       }
 
-      // Успешный ответ
+      // Успешный ответ (warnings — неблокирующие предупреждения для UI, например лимит EX-паллет в ячейке)
       logger.info('Товар успешно перемещен');
+      const warnings = result.warnings || [];
+      const { warnings: _omitWarnings, ...movePayload } = result;
       return res.status(200).json({
         success: true,
         msg: 'Товар успешно перемещен',
-        data: result
+        data: movePayload,
+        warnings
       });
     } catch (error) {
       logger.error('Ошибка при перемещении товара:', error);

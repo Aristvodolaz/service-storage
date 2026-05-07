@@ -319,4 +319,50 @@ router.get('/report', [
   validate
 ], operationLogController.getReport);
 
+/**
+ * @swagger
+ * /api/logs/storage-zone:
+ *   get:
+ *     summary: Отчет по операциям в зоне хранения
+ *     description: Возвращает количество выполненных операций в зоне хранения, сгруппированных по типу
+ *     tags: [Логи операций]
+ *     parameters:
+ *       - in: query
+ *         name: date_from
+ *         schema:
+ *           type: string
+ *           format: date-time
+ *         description: Дата начала периода (ISO 8601)
+ *       - in: query
+ *         name: date_to
+ *         schema:
+ *           type: string
+ *           format: date-time
+ *         description: Дата окончания периода (ISO 8601)
+ *       - in: query
+ *         name: executor
+ *         schema:
+ *           type: string
+ *         description: Фильтр по исполнителю
+ *       - in: query
+ *         name: group_by
+ *         schema:
+ *           type: string
+ *           enum: [endpoint, executor, hour, day]
+ *           default: endpoint
+ *         description: Тип группировки данных
+ *     responses:
+ *       200:
+ *         description: Отчет по операциям в зоне хранения
+ *       500:
+ *         description: Внутренняя ошибка сервера
+ */
+router.get('/storage-zone', [
+  query('date_from').optional().isISO8601(),
+  query('date_to').optional().isISO8601(),
+  query('executor').optional().isString().trim(),
+  query('group_by').optional().isIn(['endpoint', 'executor', 'hour', 'day']),
+  validate
+], operationLogController.getStorageZoneReport);
+
 module.exports = router;

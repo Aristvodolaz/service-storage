@@ -87,6 +87,36 @@ headers: {
 
 ## API для просмотра логов
 
+### GET /api/logs/report ⭐ НОВЫЙ - Для отчетов на фронтенде
+
+Получение структурированного отчета с агрегированными данными для построения графиков и таблиц.
+
+**Параметры запроса:**
+
+| Параметр | Тип | Описание |
+|----------|-----|----------|
+| `date_from` | datetime | Начало периода (ISO 8601) |
+| `date_to` | datetime | Конец периода (ISO 8601) |
+| `executor` | string | Фильтр по исполнителю |
+| `endpoint` | string | Фильтр по endpoint |
+| `group_by` | string | Тип группировки: `hour`, `day`, `endpoint`, `executor`, `status_code`, `method` |
+| `include_details` | boolean | Включить детальные логи (по умолчанию false) |
+
+**Быстрые примеры:**
+
+```bash
+# График по часам
+GET /api/logs/report?date_from=2026-02-08T00:00:00Z&date_to=2026-02-09T00:00:00Z&group_by=hour
+
+# Топ операций
+GET /api/logs/report?group_by=endpoint
+
+# Активность пользователя
+GET /api/logs/report?executor=user_123&group_by=day
+```
+
+**Подробная документация:** [REPORT_API_EXAMPLES.md](REPORT_API_EXAMPLES.md)
+
 ### GET /api/logs
 
 Получение списка логов с фильтрацией и пагинацией.

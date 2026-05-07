@@ -110,7 +110,7 @@ class StorageService {
       }
       if (shk) {
         query += ` AND SHK = @shk`;
-        params.push({ name: 'shk', value: shk }); image.png
+        params.push({ name: 'shk', value: shk });
       }
       if (article) {
         query += ` AND Article = @article`;
@@ -278,7 +278,8 @@ class StorageService {
       reason,
       shk,
       sklad_id,
-      productQnt
+      productQnt,
+      exPalletType
     } = params;
 
     try {
@@ -337,6 +338,35 @@ class StorageService {
         };
       }
 
+      // Резервируем соседние ячейки для многоадресных ЕХ паллет
+      const extraAddresses = exPalletType === 'EURO_X2' ? 1
+                           : exPalletType === 'FIN_X2'  ? 2
+                           : 0;
+      if (extraAddresses > 0) {
+        try {
+          const adjacentCells = await this.repository.getAdjacentCells(wrShk, extraAddresses, sklad_id);
+          for (const cell of adjacentCells) {
+            await this.repository.addOccupancyRecord({
+              wrShk: cell.shk,
+              skladId: sklad_id,
+              name,
+              article,
+              shk,
+              executor,
+              expirationDate
+            });
+          }
+          if (adjacentCells.length < extraAddresses) {
+            logger.warn(`Запрошено ${extraAddresses} доп. ячеек, найдено только ${adjacentCells.length}`);
+          }
+        } catch (err) {
+          logger.error('Ошибка резервирования соседних ячеек:', err);
+          // не прерываем основной поток — товар уже размещён
+        }
+      }
+
+      const warnings = await this.buildExPalletCellWarnings(wrShk, sklad_id);
+
       return {
         success: true,
         msg: 'Товар успешно размещен в буфер',
@@ -347,7 +377,8 @@ class StorageService {
           conditionState: conditionState || 'кондиция',
           expirationDate,
           productQnt
-        }
+        },
+        warnings
       };
     } catch (error) {
       logger.error('Ошибка при размещении товара в буфер:', error);
@@ -628,6 +659,7 @@ class StorageService {
           name_wr_shk: item.name_wr_shk,
           productQnt: item.product_qnt,
           conditionState: item.condition_state,
+          reason: item.reason || null,
           expirationDate: item.expiration_date
         });
       });
@@ -864,10 +896,43 @@ class StorageService {
       });
 
       logger.info('Результат перемещения товара:', JSON.stringify(result));
-      return result;
+      if (result.error) {
+        return result;
+      }
+
+      const targetWrShk = params.targetWrShk || params.targetLocationId;
+      const warnings = await this.buildExPalletCellWarnings(targetWrShk, params.id_sklad);
+      return { ...result, warnings };
     } catch (error) {
       logger.error('Ошибка при перемещении товара:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Предупреждение при лимите EX-паллет в одной ячейке (не блокирует операцию).
+   * @param {string} wrShk - ШК ячейки
+   * @param {string|null|undefined} idScklad - id склада
+   * @returns {Promise<Array<{code: string, severity: string, message: string, palletUnits: number}>>}
+   */
+  async buildExPalletCellWarnings(wrShk, idScklad) {
+    try {
+      if (!this.repository) {
+        await this.initialize();
+      }
+      const palletUnits = await this.repository.countExPalletUnitsInCell(wrShk, idScklad);
+      if (palletUnits >= 2) {
+        return [{
+          code: 'ex_pallet_cell_limit',
+          severity: 'warning',
+          message: 'В этой ячейке уже размещено 2 или более паллет. Проверьте, что адрес выбран верно.',
+          palletUnits: Math.round(palletUnits * 1000) / 1000
+        }];
+      }
+      return [];
+    } catch (error) {
+      logger.error('Ошибка при формировании предупреждения по паллетам:', error);
+      return [];
     }
   }
 

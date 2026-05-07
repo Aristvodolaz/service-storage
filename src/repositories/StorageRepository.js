@@ -52,31 +52,55 @@ class StorageRepository {
 
       if (shk) {
         query = `
-          SELECT * FROM OPENQUERY(OW,
-            'SELECT
-              a.id,
-              a.name,
-              a.PIECE_GTIN as shk,
-              a.article_id_real,
-              COALESCE(a.qnt_in_pallet, 0) as qnt_in_pallet
-            FROM wms.article a
-            WHERE a.PIECE_GTIN = ''${shk}''
-            AND a.article_id_real = a.id'
+          WITH wms_result AS (
+            SELECT * FROM OPENQUERY(OW,
+              'SELECT
+                a.id,
+                a.name,
+                a.PIECE_GTIN as shk,
+                a.article_id_real,
+                COALESCE(a.qnt_in_pallet, 0) as qnt_in_pallet
+              FROM wms.article a
+              WHERE a.PIECE_GTIN = ''${shk}''
+              AND a.article_id_real = a.id'
+            )
           )
+          SELECT
+            w.id, w.name, w.shk, w.article_id_real, w.qnt_in_pallet,
+            s.CONDITION_STATE, s.REASON
+          FROM wms_result w
+          LEFT JOIN (
+            SELECT ARTICLE, MAX(CONDITION_STATE) AS CONDITION_STATE,
+              MAX(CASE WHEN REASON = N'Блокировка для использования' THEN REASON ELSE NULL END) AS REASON
+            FROM [SPOe_rc].[dbo].[x_Storage_Full_Info]
+            GROUP BY ARTICLE
+          ) s ON s.ARTICLE = w.article_id_real
         `;
       } else if (article) {
         query = `
-          SELECT * FROM OPENQUERY(OW,
-            'SELECT
-              a.id,
-              a.name,
-              a.PIECE_GTIN as shk,
-              a.article_id_real,
-              COALESCE(a.qnt_in_pallet, 0) as qnt_in_pallet
-            FROM wms.article a
-            WHERE a.id = ''${article}''
-            AND a.article_id_real = a.id'
+          WITH wms_result AS (
+            SELECT * FROM OPENQUERY(OW,
+              'SELECT
+                a.id,
+                a.name,
+                a.PIECE_GTIN as shk,
+                a.article_id_real,
+                COALESCE(a.qnt_in_pallet, 0) as qnt_in_pallet
+              FROM wms.article a
+              WHERE a.id = ''${article}''
+              AND a.article_id_real = a.id'
+            )
           )
+          SELECT
+            w.id, w.name, w.shk, w.article_id_real, w.qnt_in_pallet,
+            s.CONDITION_STATE, s.REASON
+          FROM wms_result w
+          LEFT JOIN (
+            SELECT ARTICLE, MAX(CONDITION_STATE) AS CONDITION_STATE,
+              MAX(CASE WHEN REASON = N'Блокировка для использования' THEN REASON ELSE NULL END) AS REASON
+            FROM [SPOe_rc].[dbo].[x_Storage_Full_Info]
+            GROUP BY ARTICLE
+          ) s ON s.ARTICLE = w.article_id_real
         `;
       }
 
@@ -85,7 +109,11 @@ class StorageRepository {
       logger.info(`Получено записей: ${result.recordset.length}`);
       logger.info('Результаты поиска:', JSON.stringify(result.recordset));
 
-      return result.recordset;
+      return result.recordset.map(row => ({
+        ...row,
+        CONDITION_STATE: row.CONDITION_STATE || null,
+        REASON: row.REASON || null
+      }));
     } catch (error) {
       logger.error('Ошибка при поиске товара:', error);
       throw error;
@@ -254,6 +282,53 @@ class StorageRepository {
    */
   getPrunitTypeText(typeId) {
     return this.prunitTypes[typeId] || this.prunitTypes[0];
+  }
+
+  /**
+   * Суммарное число паллет в ячейке (EX): сумма Place_QNT / Product_QNT по строкам с Prunit_Name «паллет».
+   * Используется для предупреждения при превышении лимита паллет на адрес.
+   * @param {string} wrShk - ШК ячейки (WR_SHK)
+   * @param {string|null|undefined} idScklad - Склад (id_scklad), если нужно сузить выборку
+   * @returns {Promise<number>}
+   */
+  async countExPalletUnitsInCell(wrShk, idScklad) {
+    try {
+      if (!wrShk) {
+        return 0;
+      }
+
+      let query = `
+        SELECT ISNULL(SUM(
+          CASE
+            WHEN Place_QNT > 0 AND Product_QNT > 0
+              AND (
+                LOWER(ISNULL(Prunit_Name, N'')) LIKE N'%паллет%'
+                OR LOWER(ISNULL(Prunit_Name, N'')) LIKE N'%pallet%'
+                OR LTRIM(RTRIM(CAST(Prunit_Id AS NVARCHAR(64)))) = N'11'
+              )
+            THEN CAST(Place_QNT AS FLOAT) / NULLIF(CAST(Product_QNT AS FLOAT), 0)
+            ELSE 0
+          END
+        ), 0) AS palletUnits
+        FROM [SPOe_rc].[dbo].[x_Storage_Full_Info]
+        WHERE WR_SHK = @wrShk
+          AND Place_QNT > 0
+      `;
+
+      const request = this.pool.request().input('wrShk', wrShk);
+
+      if (idScklad !== null && idScklad !== undefined && idScklad !== '') {
+        query += ` AND id_scklad = @idScklad`;
+        request.input('idScklad', idScklad);
+      }
+
+      const result = await request.query(query);
+      const v = result.recordset[0]?.palletUnits;
+      return typeof v === 'number' ? v : parseFloat(v) || 0;
+    } catch (error) {
+      logger.error('Ошибка при подсчёте паллет в ячейке:', error);
+      return 0;
+    }
   }
 
   /**
@@ -826,6 +901,7 @@ class StorageRepository {
           id_scklad,
           wr_shk,
           condition_state,
+          reason,
           expiration_date,
           start_expiration_date,
           end_expiration_date,
@@ -2151,6 +2227,118 @@ class StorageRepository {
         wrHouse: item.WR_House
       }));
     } catch (error) {
+      throw error;
+    }
+  }
+
+  /**
+   * Найти N ячеек, следующих по имени за ячейкой wrShk в том же WR_House.
+   * Используется для многоадресного размещения ЕХ паллет.
+   */
+  async getAdjacentCells(wrShk, count, skladId) {
+    try {
+      const findCurrentQuery = `
+        SELECT [Name], [WR_House]
+        FROM [SPOe_rc].[dbo].[x_Storage_Scklads]
+        WHERE [SHK] = @wrShk
+          AND (@skladId IS NULL OR [WR_House] = @skladId)
+      `;
+      const currentResult = await this.pool.request()
+        .input('wrShk', wrShk)
+        .input('skladId', skladId || null)
+        .query(findCurrentQuery);
+
+      if (currentResult.recordset.length === 0) {
+        return [];
+      }
+
+      const { Name: currentName, WR_House: wrHouse } = currentResult.recordset[0];
+
+      const adjacentQuery = `
+        SELECT TOP (@count) [ID], [Name], [SHK], [WR_House]
+        FROM [SPOe_rc].[dbo].[x_Storage_Scklads]
+        WHERE [WR_House] = @wrHouse
+          AND [Name] > @currentName
+        ORDER BY [Name]
+      `;
+      const adjacentResult = await this.pool.request()
+        .input('count', sql.Int, count)
+        .input('wrHouse', wrHouse)
+        .input('currentName', currentName)
+        .query(adjacentQuery);
+
+      return adjacentResult.recordset.map(r => ({
+        id: r.ID,
+        name: r.Name,
+        shk: r.SHK,
+        wrHouse: r.WR_House
+      }));
+    } catch (error) {
+      logger.error('Ошибка при поиске соседних ячеек:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Создать запись-заглушку "Занято ЕХ паллетом" в x_Storage_Full_Info.
+   * Place_QNT=1 гарантирует, что ячейка не попадёт в список пустых.
+   */
+  async addOccupancyRecord(data) {
+    try {
+      const { wrShk, skladId, name, article, shk, executor, expirationDate } = data;
+
+      const locationResult = await this.pool.request()
+        .input('wrShk', wrShk)
+        .input('skladId', skladId || null)
+        .query(`
+          SELECT [Name]
+          FROM [SPOe_rc].[dbo].[x_Storage_Scklads]
+          WHERE [SHK] = @wrShk
+            AND (@skladId IS NULL OR [WR_House] = @skladId)
+        `);
+      const locationName = locationResult.recordset[0]?.Name || wrShk;
+
+      // Если запись-заглушка уже существует — не дублируем
+      const existsResult = await this.pool.request()
+        .input('wrShk', wrShk)
+        .input('skladId', skladId || null)
+        .query(`
+          SELECT 1 FROM [SPOe_rc].[dbo].[x_Storage_Full_Info]
+          WHERE WR_SHK = @wrShk
+            AND reason = N'Занято ЕХ паллетом'
+            AND (@skladId IS NULL AND id_scklad IS NULL OR id_scklad = @skladId)
+            AND Place_QNT > 0
+        `);
+      if (existsResult.recordset.length > 0) {
+        return true;
+      }
+
+      const id = await this.generateId();
+      await this.pool.request()
+        .input('id', id)
+        .input('name', name || 'Занято ЕХ паллетом')
+        .input('article', article || '')
+        .input('shk', shk || '')
+        .input('wrShk', wrShk)
+        .input('idScklad', skladId || null)
+        .input('expirationDate', expirationDate || null)
+        .input('executor', executor)
+        .input('nameWrShk', locationName)
+        .query(`
+          INSERT INTO [SPOe_rc].[dbo].[x_Storage_Full_Info]
+          (ID, Name, Article, SHK, Product_QNT, Prunit_Name, Prunit_Id,
+           WR_SHK, id_scklad, Expiration_Date, Start_Expiration_Date,
+           End_Expiration_Date, Executor, Place_QNT, Condition_State, reason,
+           Create_Date, Update_Date, name_wr_shk)
+          VALUES
+          (@id, @name, @article, @shk, 0, N'ЕХ', 11,
+           @wrShk, @idScklad, @expirationDate, @expirationDate,
+           @expirationDate, @executor, 1, N'кондиция', N'Занято ЕХ паллетом',
+           GETDATE(), GETDATE(), @nameWrShk)
+        `);
+      return true;
+    } catch (error) {
+      logger.error('Ошибка при создании записи-заглушки:', error);
       throw error;
     }
   }
