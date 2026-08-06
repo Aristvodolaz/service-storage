@@ -53,6 +53,70 @@ router.get('/search', [
 
 /**
  * @swagger
+ * /api/storage/operations:
+ *   get:
+ *     summary: История складских операций (размещение, перемещение, снятие)
+ *     tags: [Склад]
+ *     parameters:
+ *       - in: query
+ *         name: operationType
+ *         schema:
+ *           type: string
+ *           enum: [PLACE, MOVE, PICK]
+ *       - in: query
+ *         name: productId
+ *         schema:
+ *           type: string
+ *         description: Артикул товара
+ *       - in: query
+ *         name: locationId
+ *         schema:
+ *           type: string
+ *         description: ШК ячейки (откуда или куда)
+ *       - in: query
+ *         name: executor
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: date_from
+ *         schema:
+ *           type: string
+ *           format: date-time
+ *       - in: query
+ *         name: date_to
+ *         schema:
+ *           type: string
+ *           format: date-time
+ *       - in: query
+ *         name: limit
+ *         schema:
+ *           type: integer
+ *           default: 100
+ *       - in: query
+ *         name: offset
+ *         schema:
+ *           type: integer
+ *           default: 0
+ *     responses:
+ *       200:
+ *         description: Список операций
+ *       500:
+ *         description: Внутренняя ошибка сервера
+ */
+router.get('/operations', [
+  query('operationType').optional().isIn(['PLACE', 'MOVE', 'PICK']),
+  query('productId').optional().isString().trim(),
+  query('locationId').optional().isString().trim(),
+  query('executor').optional().isString().trim(),
+  query('date_from').optional().isISO8601(),
+  query('date_to').optional().isISO8601(),
+  query('limit').optional().isInt({ min: 1, max: 1000 }),
+  query('offset').optional().isInt({ min: 0 }),
+  validate
+], storageController.getStorageOperations);
+
+/**
+ * @swagger
  * /api/storage/info:
  *   get:
  *     summary: Получение информации о товаре по артикулу, ШК или ШК ячейки

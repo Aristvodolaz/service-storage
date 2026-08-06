@@ -1313,6 +1313,53 @@ class StorageController {
       });
     }
   }
+
+  /**
+   * Получение истории складских операций
+   * inputs: query-фильтры и пагинация
+   * outputs: JSON со списком операций
+   */
+  async getStorageOperations(req, res) {
+    try {
+      const {
+        operationType,
+        productId,
+        locationId,
+        executor,
+        date_from,
+        date_to,
+        limit = 100,
+        offset = 0
+      } = req.query;
+
+      const filters = {};
+      if (operationType) filters.operationType = operationType;
+      if (productId) filters.productId = productId;
+      if (locationId) filters.locationId = locationId;
+      if (executor) filters.executor = executor;
+      if (date_from) filters.date_from = date_from;
+      if (date_to) filters.date_to = date_to;
+
+      const result = await storageService.getStorageOperations(
+        filters,
+        parseInt(limit, 10),
+        parseInt(offset, 10)
+      );
+
+      if (!result.success) {
+        return res.status(result.errorCode || 500).json(result);
+      }
+
+      return res.status(200).json(result);
+    } catch (error) {
+      logger.error('Ошибка при получении истории операций:', error);
+      return res.status(500).json({
+        success: false,
+        errorCode: 500,
+        msg: 'Внутренняя ошибка сервера: ' + error.message
+      });
+    }
+  }
 }
 
 module.exports = new StorageController();

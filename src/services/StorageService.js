@@ -1808,6 +1808,38 @@ class StorageService {
       };
     }
   }
+
+  /**
+   * История складских операций (размещение / перемещение / снятие)
+   * inputs: filters, limit, offset
+   * outputs: { success, data, meta }
+   */
+  async getStorageOperations(filters = {}, limit = 100, offset = 0) {
+    try {
+      if (!this.repository) {
+        await this.initialize();
+      }
+
+      const result = await this.repository.getStorageOperations(filters, limit, offset);
+
+      return {
+        success: true,
+        data: result.items,
+        meta: {
+          total: result.total,
+          limit: result.limit,
+          offset: result.offset
+        }
+      };
+    } catch (error) {
+      logger.error('Ошибка при получении истории операций:', error);
+      return {
+        success: false,
+        errorCode: 500,
+        msg: 'Внутренняя ошибка сервера: ' + error.message
+      };
+    }
+  }
 }
 
 module.exports = new StorageService();

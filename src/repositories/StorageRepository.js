@@ -807,6 +807,19 @@ class StorageRepository {
 
         await deleteRequest.query(deleteQuery);
 
+        await this.logStorageOperation({
+          operationType: 'PICK',
+          productId: item.Article || productId,
+          productName: item.Name,
+          prunitId: prunitId,
+          fromLocationId: locationId,
+          toLocationId: null,
+          quantity: actualRequestedQuantity,
+          expirationDate: expirationDate,
+          conditionState: item.Condition_State,
+          executor: executor
+        });
+
         return {
           success: true,
           locationId: locationId,
@@ -856,23 +869,36 @@ class StorageRepository {
 
         await updateRequest.query(updateQuery);
 
-      return {
-          success: true,
-        locationId: locationId,
-        prunitId: prunitId,
-        name: item.Name,
-        article: item.Article,
-        shk: item.SHK,
-        conditionState: item.Condition_State,
+        await this.logStorageOperation({
+          operationType: 'PICK',
+          productId: item.Article || productId,
+          productName: item.Name,
+          prunitId: prunitId,
+          fromLocationId: locationId,
+          toLocationId: null,
+          quantity: actualRequestedQuantity,
           expirationDate: expirationDate,
-        previousQuantity: currentQuantity,
-        newQuantity: newQuantity,
-        pickedQuantity: actualRequestedQuantity,
-        requestedQuantity,
+          conditionState: item.Condition_State,
+          executor: executor
+        });
+
+        return {
+          success: true,
+          locationId: locationId,
+          prunitId: prunitId,
+          name: item.Name,
+          article: item.Article,
+          shk: item.SHK,
+          conditionState: item.Condition_State,
+          expirationDate: expirationDate,
+          previousQuantity: currentQuantity,
+          newQuantity: newQuantity,
+          pickedQuantity: actualRequestedQuantity,
+          requestedQuantity,
           unitsPerPack: actualUnitsPerPack,
           pickedPacks: requestedQuantity,
           isDeleted: false
-      };
+        };
       }
     } catch (error) {
       logger.error('Error in pickFromLocationBySkladId:', error);
@@ -1038,42 +1064,171 @@ class StorageRepository {
 
   /**
    * Логирование операции в x_Storage_Operations
+   * inputs: тип, артикул, название, ЕХ, ячейки, кол-во, исполнитель
+   * outputs: true если запись создана
    */
   async logStorageOperation(data) {
     try {
       logger.info('Логирование операции:', JSON.stringify(data));
 
-      const query = `
-        INSERT INTO [SPOe_rc].[dbo].[x_Storage_Operations]
-        (operationType, productId, prunitId, fromLocationId, toLocationId,
-         quantity, expirationDate, conditionState, executor, executedAt)
-        VALUES
-        (@operationType, @productId, @prunitId, @fromLocationId, @toLocationId,
-         @quantity, @expirationDate, @conditionState, @executor, GETDATE())
-      `;
+      const bindCommon = (request) => {
+        request
+          .input('operationType', sql.NVarChar, data.operationType)
+          .input('productId', sql.NVarChar, data.productId ? data.productId.toString() : null)
+          .input('prunitId', data.prunitId != null ? data.prunitId : null)
+          .input('fromLocationId', sql.NVarChar, data.fromLocationId ? data.fromLocationId.toString() : null)
+          .input('toLocationId', sql.NVarChar, data.toLocationId ? data.toLocationId.toString() : null)
+          .input('quantity', data.quantity != null ? data.quantity : null)
+          .input('conditionState', sql.NVarChar, data.conditionState || null)
+          .input('executor', sql.NVarChar, data.executor || null)
+          .input('expirationDate', data.expirationDate || null);
+        return request;
+      };
 
-      const request = this.pool.request()
-        .input('operationType', data.operationType)
-        .input('productId', data.productId)
-        .input('prunitId', data.prunitId)
-        .input('fromLocationId', sql.NVarChar, data.fromLocationId ? data.fromLocationId.toString() : null)
-        .input('toLocationId', sql.NVarChar, data.toLocationId ? data.toLocationId.toString() : null)
-        .input('quantity', data.quantity)
-        .input('conditionState', data.conditionState)
-        .input('executor', data.executor);
+      try {
+        const request = bindCommon(this.pool.request())
+          .input('productName', sql.NVarChar, data.productName || null);
 
-      if (data.expirationDate) {
-        request.input('expirationDate', data.expirationDate);
-      } else {
-        request.input('expirationDate', null);
+        const result = await request.query(`
+          INSERT INTO [SPOe_rc].[dbo].[x_Storage_Operations]
+          (operationType, productId, productName, prunitId, fromLocationId, toLocationId,
+           quantity, expirationDate, conditionState, executor, executedAt)
+          VALUES
+          (@operationType, @productId, @productName, @prunitId, @fromLocationId, @toLocationId,
+           @quantity, @expirationDate, @conditionState, @executor, GETDATE())
+        `);
+        return result.rowsAffected[0] > 0;
+      } catch (columnError) {
+        // Fallback: таблица без колонки productName
+        logger.warn('Повтор логирования без productName:', columnError.message);
+        const request = bindCommon(this.pool.request());
+        const result = await request.query(`
+          INSERT INTO [SPOe_rc].[dbo].[x_Storage_Operations]
+          (operationType, productId, prunitId, fromLocationId, toLocationId,
+           quantity, expirationDate, conditionState, executor, executedAt)
+          VALUES
+          (@operationType, @productId, @prunitId, @fromLocationId, @toLocationId,
+           @quantity, @expirationDate, @conditionState, @executor, GETDATE())
+        `);
+        return result.rowsAffected[0] > 0;
       }
-
-      const result = await request.query(query);
-      return result.rowsAffected[0] > 0;
     } catch (error) {
       logger.error('Ошибка при логировании операции:', error);
       // Не выбрасываем ошибку, чтобы не прерывать основную операцию
       return false;
+    }
+  }
+
+  /**
+   * Получение истории складских операций с фильтрами и пагинацией
+   * inputs: filters, limit, offset
+   * outputs: { items, total, limit, offset }
+   */
+  async getStorageOperations(filters = {}, limit = 100, offset = 0) {
+    try {
+      const where = [];
+      const applyFilters = (request) => {
+        if (filters.operationType) {
+          request.input('operationType', sql.NVarChar, filters.operationType);
+        }
+        if (filters.productId) {
+          request.input('productId', sql.NVarChar, `%${filters.productId}%`);
+        }
+        if (filters.locationId) {
+          request.input('locationId', sql.NVarChar, `%${filters.locationId}%`);
+        }
+        if (filters.executor) {
+          request.input('executor', sql.NVarChar, `%${filters.executor}%`);
+        }
+        if (filters.date_from) {
+          request.input('dateFrom', sql.DateTime, new Date(filters.date_from));
+        }
+        if (filters.date_to) {
+          request.input('dateTo', sql.DateTime, new Date(filters.date_to));
+        }
+        return request;
+      };
+
+      if (filters.operationType) where.push('operationType = @operationType');
+      if (filters.productId) where.push('productId LIKE @productId');
+      if (filters.locationId) {
+        where.push('(fromLocationId LIKE @locationId OR toLocationId LIKE @locationId)');
+      }
+      if (filters.executor) where.push('executor LIKE @executor');
+      if (filters.date_from) where.push('executedAt >= @dateFrom');
+      if (filters.date_to) where.push('executedAt <= @dateTo');
+
+      const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+      const safeLimit = Math.min(Math.max(parseInt(limit, 10) || 100, 1), 1000);
+      const safeOffset = Math.max(parseInt(offset, 10) || 0, 0);
+
+      const countResult = await applyFilters(this.pool.request()).query(`
+        SELECT COUNT(*) as total
+        FROM [SPOe_rc].[dbo].[x_Storage_Operations]
+        ${whereSql}
+      `);
+
+      const listRequest = applyFilters(this.pool.request());
+      listRequest.input('limit', sql.Int, safeLimit);
+      listRequest.input('offset', sql.Int, safeOffset);
+
+      let itemsResult;
+      try {
+        itemsResult = await listRequest.query(`
+          SELECT
+            id,
+            operationType,
+            productId,
+            productName,
+            prunitId,
+            fromLocationId,
+            toLocationId,
+            quantity,
+            expirationDate,
+            conditionState,
+            executor,
+            executedAt
+          FROM [SPOe_rc].[dbo].[x_Storage_Operations]
+          ${whereSql}
+          ORDER BY executedAt DESC
+          OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
+        `);
+      } catch (columnError) {
+        // Fallback: таблица без колонки productName
+        logger.warn('Чтение истории без productName:', columnError.message);
+        const fallbackRequest = applyFilters(this.pool.request());
+        fallbackRequest.input('limit', sql.Int, safeLimit);
+        fallbackRequest.input('offset', sql.Int, safeOffset);
+        itemsResult = await fallbackRequest.query(`
+          SELECT
+            id,
+            operationType,
+            productId,
+            NULL as productName,
+            prunitId,
+            fromLocationId,
+            toLocationId,
+            quantity,
+            expirationDate,
+            conditionState,
+            executor,
+            executedAt
+          FROM [SPOe_rc].[dbo].[x_Storage_Operations]
+          ${whereSql}
+          ORDER BY executedAt DESC
+          OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
+        `);
+      }
+
+      return {
+        items: itemsResult.recordset,
+        total: countResult.recordset[0].total,
+        limit: safeLimit,
+        offset: safeOffset
+      };
+    } catch (error) {
+      logger.error('Ошибка при получении истории операций:', error);
+      throw error;
     }
   }
 
@@ -1141,6 +1296,19 @@ class StorageRepository {
             .input('id', record.ID)
             .query(deleteQuery);
 
+          await this.logStorageOperation({
+            operationType: 'PLACE',
+            productId: data.article || data.productId,
+            productName: data.name,
+            prunitId: data.prunitId,
+            fromLocationId: null,
+            toLocationId: data.wrShk,
+            quantity: data.quantity,
+            expirationDate: data.expirationDate,
+            conditionState: data.conditionState,
+            executor: data.executor
+          });
+
           return true;
         }
 
@@ -1165,6 +1333,19 @@ class StorageRepository {
           .input('reason', data.reason)
           .input('nameWrShk', locationName)
           .query(updateQuery);
+
+        await this.logStorageOperation({
+          operationType: 'PLACE',
+          productId: data.article || data.productId,
+          productName: data.name,
+          prunitId: data.prunitId,
+          fromLocationId: null,
+          toLocationId: data.wrShk,
+          quantity: data.quantity,
+          expirationDate: data.expirationDate,
+          conditionState: data.conditionState,
+          executor: data.executor
+        });
 
         return true;
       }
@@ -1203,6 +1384,19 @@ class StorageRepository {
         .input('reason', data.reason)
         .input('nameWrShk', locationName)
         .query(insertQuery);
+
+      await this.logStorageOperation({
+        operationType: 'PLACE',
+        productId: data.article || data.productId,
+        productName: data.name,
+        prunitId: data.prunitId,
+        fromLocationId: null,
+        toLocationId: data.wrShk,
+        quantity: data.quantity,
+        expirationDate: data.expirationDate,
+        conditionState: data.conditionState,
+        executor: data.executor
+      });
 
       return true;
     } catch (error) {
@@ -2067,6 +2261,20 @@ class StorageRepository {
 
         // Завершаем транзакцию
         await transaction.commit();
+
+        // Пишем историю перемещения после успешного commit
+        await this.logStorageOperation({
+          operationType: 'MOVE',
+          productId: productId,
+          productName: sourceItem.Name,
+          prunitId: prunitId,
+          fromLocationId: sourceLocationId,
+          toLocationId: actualTargetWrShk,
+          quantity: requestedQuantity,
+          expirationDate: expirationDate || sourceItem.Expiration_Date,
+          conditionState: conditionState || sourceItem.Condition_State,
+          executor: executor
+        });
 
         return {
           success: true,
