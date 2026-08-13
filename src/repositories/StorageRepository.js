@@ -1126,7 +1126,6 @@ class StorageRepository {
    */
   async getStorageOperations(filters = {}, limit = 100, offset = 0) {
     try {
-      const where = [];
       const applyFilters = (request) => {
         if (filters.operationType) {
           request.input('operationType', sql.NVarChar, filters.operationType);
@@ -1149,48 +1148,65 @@ class StorageRepository {
         return request;
       };
 
-      if (filters.operationType) where.push('operationType = @operationType');
-      if (filters.productId) where.push('productId LIKE @productId');
-      if (filters.locationId) {
-        where.push('(fromLocationId LIKE @locationId OR toLocationId LIKE @locationId)');
-      }
-      if (filters.executor) where.push('executor LIKE @executor');
-      if (filters.date_from) where.push('executedAt >= @dateFrom');
-      if (filters.date_to) where.push('executedAt <= @dateTo');
+      // alias: '' для COUNT, 'o.' для SELECT с join названий ячеек
+      const buildWhereSql = (alias = '') => {
+        const where = [];
+        if (filters.operationType) where.push(`${alias}operationType = @operationType`);
+        if (filters.productId) where.push(`${alias}productId LIKE @productId`);
+        if (filters.locationId) {
+          where.push(`(${alias}fromLocationId LIKE @locationId OR ${alias}toLocationId LIKE @locationId)`);
+        }
+        if (filters.executor) where.push(`${alias}executor LIKE @executor`);
+        if (filters.date_from) where.push(`${alias}executedAt >= @dateFrom`);
+        if (filters.date_to) where.push(`${alias}executedAt <= @dateTo`);
+        return where.length ? `WHERE ${where.join(' AND ')}` : '';
+      };
 
-      const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
       const safeLimit = Math.min(Math.max(parseInt(limit, 10) || 100, 1), 1000);
       const safeOffset = Math.max(parseInt(offset, 10) || 0, 0);
 
       const countResult = await applyFilters(this.pool.request()).query(`
         SELECT COUNT(*) as total
         FROM [SPOe_rc].[dbo].[x_Storage_Operations]
-        ${whereSql}
+        ${buildWhereSql()}
       `);
 
       const listRequest = applyFilters(this.pool.request());
       listRequest.input('limit', sql.Int, safeLimit);
       listRequest.input('offset', sql.Int, safeOffset);
 
+      // Названия ячеек берём из x_Storage_Scklads по ШК (как name_wr_shk в поиске)
       let itemsResult;
       try {
         itemsResult = await listRequest.query(`
           SELECT
-            id,
-            operationType,
-            productId,
-            productName,
-            prunitId,
-            fromLocationId,
-            toLocationId,
-            quantity,
-            expirationDate,
-            conditionState,
-            executor,
-            executedAt
-          FROM [SPOe_rc].[dbo].[x_Storage_Operations]
-          ${whereSql}
-          ORDER BY executedAt DESC
+            o.id,
+            o.operationType,
+            o.productId,
+            o.productName,
+            o.prunitId,
+            o.fromLocationId,
+            fs.name AS fromLocationName,
+            o.toLocationId,
+            ts.name AS toLocationName,
+            o.quantity,
+            o.expirationDate,
+            o.conditionState,
+            o.executor,
+            o.executedAt
+          FROM [SPOe_rc].[dbo].[x_Storage_Operations] o
+          OUTER APPLY (
+            SELECT TOP 1 name
+            FROM [SPOe_rc].[dbo].[x_Storage_Scklads]
+            WHERE shk = o.fromLocationId
+          ) fs
+          OUTER APPLY (
+            SELECT TOP 1 name
+            FROM [SPOe_rc].[dbo].[x_Storage_Scklads]
+            WHERE shk = o.toLocationId
+          ) ts
+          ${buildWhereSql('o.')}
+          ORDER BY o.executedAt DESC
           OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
         `);
       } catch (columnError) {
@@ -1201,21 +1217,33 @@ class StorageRepository {
         fallbackRequest.input('offset', sql.Int, safeOffset);
         itemsResult = await fallbackRequest.query(`
           SELECT
-            id,
-            operationType,
-            productId,
+            o.id,
+            o.operationType,
+            o.productId,
             NULL as productName,
-            prunitId,
-            fromLocationId,
-            toLocationId,
-            quantity,
-            expirationDate,
-            conditionState,
-            executor,
-            executedAt
-          FROM [SPOe_rc].[dbo].[x_Storage_Operations]
-          ${whereSql}
-          ORDER BY executedAt DESC
+            o.prunitId,
+            o.fromLocationId,
+            fs.name AS fromLocationName,
+            o.toLocationId,
+            ts.name AS toLocationName,
+            o.quantity,
+            o.expirationDate,
+            o.conditionState,
+            o.executor,
+            o.executedAt
+          FROM [SPOe_rc].[dbo].[x_Storage_Operations] o
+          OUTER APPLY (
+            SELECT TOP 1 name
+            FROM [SPOe_rc].[dbo].[x_Storage_Scklads]
+            WHERE shk = o.fromLocationId
+          ) fs
+          OUTER APPLY (
+            SELECT TOP 1 name
+            FROM [SPOe_rc].[dbo].[x_Storage_Scklads]
+            WHERE shk = o.toLocationId
+          ) ts
+          ${buildWhereSql('o.')}
+          ORDER BY o.executedAt DESC
           OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
         `);
       }
