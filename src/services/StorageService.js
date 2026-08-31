@@ -561,22 +561,20 @@ class StorageService {
    */
   async pickFromLocation(data) {
     try {
+      if (!this.repository) {
+        await this.initialize();
+      }
+
       const { productId, locationId, prunitId, quantity, executor } = data;
 
       if (!productId || !locationId || !prunitId || !quantity || !executor) {
-        throw new Error('Не все обязательные параметры указаны');
+        return { error: 'missing_params' };
       }
 
       const result = await this.repository.pickFromLocation(data);
-
       if (!result) {
-        throw new Error('Товар не найден в указанной ячейке');
+        return { error: 'not_found' };
       }
-
-      if (result.error === 'insufficient_quantity') {
-        throw new Error(`Недостаточное количество товара: доступно ${result.available}, запрошено ${quantity}`);
-      }
-
       return result;
     } catch (error) {
       logger.error('Error in pickFromLocation service:', error);
@@ -585,26 +583,25 @@ class StorageService {
   }
 
   /**
-   * Снятие товара из ячейки с учетом поля sklad_id
+   * Снятие товара из ячейки с учетом поля sklad_id.
+   * Не бросает ошибку, если ячейка пуста — возвращает { error: 'not_found' }.
    */
   async pickFromLocationBySkladId(data) {
     try {
-      const { productId, locationId, prunitId, quantity, executor, sklad_id } = data;
+      if (!this.repository) {
+        await this.initialize();
+      }
+
+      const { productId, locationId, prunitId, quantity, executor } = data;
 
       if (!productId || !locationId || !prunitId || !quantity || !executor) {
-        throw new Error('Не все обязательные параметры указаны');
+        return { error: 'missing_params' };
       }
 
       const result = await this.repository.pickFromLocationBySkladId(data);
-
       if (!result) {
-        throw new Error('Товар не найден в указанной ячейке');
+        return { error: 'not_found' };
       }
-
-      if (result.error === 'insufficient_quantity') {
-        throw new Error(`Недостаточное количество товара: доступно ${result.available}, запрошено ${quantity}`);
-      }
-
       return result;
     } catch (error) {
       logger.error('Error in pickFromLocationBySkladId service:', error);
@@ -646,8 +643,8 @@ class StorageService {
             article: item.article,
             shk: item.shk,
             idSklad: item.id_scklad,
-            wrShk: item.wr_shk,
-            locationName: item.name_scklad,
+            wrShk: item.wr_shk || item.WR_SHK,
+            locationName: item.name_wr_shk || item.name_scklad,
             units: []
           };
         }

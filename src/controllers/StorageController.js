@@ -369,7 +369,7 @@ class StorageController {
    */
   async pickFromLocation(req, res) {
     try {
-      const { productId, WR_SHK, prunitId, quantity, executor } = req.body;
+      const { productId, WR_SHK, prunitId, quantity, executor, sklad_id, productQnt } = req.body;
 
       logger.info('Запрос на снятие товара из ячейки:', req.body);
 
@@ -378,8 +378,25 @@ class StorageController {
         locationId: WR_SHK,
         prunitId,
         quantity: parseFloat(quantity),
-        executor
+        executor,
+        sklad_id,
+        productQnt: productQnt != null ? parseFloat(productQnt) : undefined
       });
+
+      if (!result || result.error === 'not_found' || result.error === 'missing_params') {
+        return res.status(200).json({
+          success: false,
+          message: 'Ячейка пуста. Товар в системе не найден.'
+        });
+      }
+
+      if (result.error === 'insufficient_quantity') {
+        return res.status(200).json({
+          success: false,
+          message: `Недостаточное количество: доступно ${result.availablePacks} ЕХ, запрошено ${quantity}`,
+          data: result
+        });
+      }
 
       return res.status(200).json({
         success: true,
@@ -400,7 +417,7 @@ class StorageController {
    */
   async pickFromLocationBySkladId(req, res) {
     try {
-      const { productId, WR_SHK, prunitId, quantity, executor, sklad_id } = req.body;
+      const { productId, WR_SHK, prunitId, quantity, executor, sklad_id, productQnt } = req.body;
 
       logger.info('Запрос на снятие товара из ячейки с учетом sklad_id:', {
         productId,
@@ -408,12 +425,12 @@ class StorageController {
         prunitId,
         quantity,
         executor,
-        sklad_id
+        sklad_id,
+        productQnt
       });
 
-      // Проверяем обязательные параметры
       if (!productId || !WR_SHK || !prunitId || !quantity || !executor) {
-        return res.status(400).json({
+        return res.status(200).json({
           success: false,
           message: 'Не все обязательные параметры указаны'
         });
@@ -425,20 +442,21 @@ class StorageController {
         prunitId,
         quantity: parseFloat(quantity),
         executor,
-        sklad_id
+        sklad_id,
+        productQnt: productQnt != null ? parseFloat(productQnt) : undefined
       });
 
-      if (!result) {
-        return res.status(404).json({
+      if (!result || result.error === 'not_found' || result.error === 'missing_params') {
+        return res.status(200).json({
           success: false,
-          message: 'Товар не найден в указанной ячейке'
+          message: 'Ячейка пуста. Товар в системе не найден.'
         });
       }
 
       if (result.error === 'insufficient_quantity') {
-        return res.status(400).json({
+        return res.status(200).json({
           success: false,
-          message: `Недостаточное количество товара: доступно ${result.available}, запрошено ${quantity}`,
+          message: `Недостаточное количество: доступно ${result.availablePacks} ЕХ, запрошено ${quantity}`,
           data: result
         });
       }

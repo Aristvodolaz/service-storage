@@ -39,6 +39,40 @@ class StorageRepository {
   }
 
   /**
+   * ШК и имя ячейки по штрихкоду или названию (например 18-05-06) из справочника.
+   * inputs: locationId, idScklad
+   * outputs: { shk, name }
+   */
+  async resolveCell(locationId, idScklad) {
+    if (!locationId) {
+      return { shk: locationId, name: locationId };
+    }
+    try {
+      const request = this.pool.request()
+        .input('locationId', sql.NVarChar, String(locationId));
+      let query = `
+        SELECT TOP 1 SHK, Name
+        FROM [SPOe_rc].[dbo].[x_Storage_Scklads]
+        WHERE SHK = @locationId OR Name = @locationId
+      `;
+      if (idScklad !== null && idScklad !== undefined && idScklad !== '') {
+        query += ` AND WR_House = @idScklad`;
+        request.input('idScklad', idScklad);
+      }
+      const result = await request.query(query);
+      if (result.recordset.length > 0) {
+        return {
+          shk: result.recordset[0].SHK || locationId,
+          name: result.recordset[0].Name || locationId
+        };
+      }
+    } catch (error) {
+      logger.error('Ошибка при определении ячейки:', error);
+    }
+    return { shk: locationId, name: locationId };
+  }
+
+  /**
    * Поиск товара по ШК или артикулу
    */
   async findByShkOrArticle(params) {
@@ -297,6 +331,8 @@ class StorageRepository {
         return 0;
       }
 
+      const cell = await this.resolveCell(wrShk, idScklad);
+
       let query = `
         SELECT ISNULL(SUM(
           CASE
@@ -311,11 +347,15 @@ class StorageRepository {
           END
         ), 0) AS palletUnits
         FROM [SPOe_rc].[dbo].[x_Storage_Full_Info]
-        WHERE WR_SHK = @wrShk
+        WHERE (WR_SHK = @wrShk OR WR_SHK = @locationId OR name_wr_shk = @cellName)
           AND Place_QNT > 0
+          AND ISNULL(reason, N'') <> N'Занято ЕХ паллетом'
       `;
 
-      const request = this.pool.request().input('wrShk', wrShk);
+      const request = this.pool.request()
+        .input('wrShk', cell.shk)
+        .input('locationId', wrShk)
+        .input('cellName', cell.name);
 
       if (idScklad !== null && idScklad !== undefined && idScklad !== '') {
         query += ` AND id_scklad = @idScklad`;
@@ -556,143 +596,8 @@ class StorageRepository {
   }
 
   async pickFromLocation(data) {
-    try {
-      const { productId, locationId, prunitId, quantity, executor, sklad_id } = data;
-
-      logger.info('Забор товара из ячейки:', JSON.stringify(data));
-
-      // Проверяем наличие товара в указанной ячейке
-      let query = `
-        SELECT
-          id,
-          name,
-          article,
-          shk,
-          prunit_id,
-          prunit_name,
-          product_qnt,
-          place_qnt,
-          id_scklad,
-          wr_shk,
-          condition_state
-        FROM [SPOe_rc].[dbo].[x_Storage_Full_Info]
-        WHERE article = @productId
-        AND prunit_id = @prunitId
-        AND wr_shk = @locationId
-        AND (@sklad_id IS NULL AND id_scklad IS NULL OR id_scklad = @sklad_id)`;
-
-      logger.info('SQL запрос для проверки наличия товара:', query);
-
-      const request = this.pool.request()
-        .input('productId', productId)
-        .input('prunitId', prunitId)
-        .input('locationId', locationId)
-        .input('sklad_id', sklad_id || null);
-
-      const result = await request.query(query);
-
-      if (result.recordset.length === 0) {
-        logger.warn('Товар не найден в указанной ячейке');
-        return null;
-      }
-
-      const item = result.recordset[0];
-
-      // Получаем количество в упаковке и общее количество упаковок
-      const unitsPerPack = parseFloat(item.product_qnt) || 0;
-      const currentQuantity = parseFloat(item.place_qnt) || 0;
-      const requestedPacks = parseFloat(quantity) || 0;  // теперь quantity - это количество упаковок
-      const actualRequestedQuantity = requestedPacks * unitsPerPack;  // общее количество штук для снятия
-
-      logger.info('Расчет количества:', {
-        unitsPerPack,
-        currentQuantity,
-        requestedPacks,
-        actualRequestedQuantity
-      });
-
-      if (currentQuantity < actualRequestedQuantity) {
-        logger.warn(`Недостаточное количество товара: доступно ${currentQuantity} (${Math.floor(currentQuantity/unitsPerPack)} упаковок), запрошено ${actualRequestedQuantity} (${requestedPacks} упаковок)`);
-        return { 
-          error: 'insufficient_quantity', 
-          available: currentQuantity,
-          availablePacks: Math.floor(currentQuantity/unitsPerPack),
-          unitsPerPack
-        };
-      }
-
-      const newQuantity = currentQuantity - actualRequestedQuantity;
-
-      if (newQuantity <= 0) {
-        // Если количество становится нулевым или отрицательным, устанавливаем place_qnt = 0
-        logger.info('Количество товара стало нулевым, устанавливаем place_qnt = 0');
-
-        let updateQuery = `
-          UPDATE [SPOe_rc].[dbo].[x_Storage_Full_Info]
-          SET Place_QNT = 0,
-              Update_Date = GETDATE(),
-              Executor = @executor
-          WHERE article = @productId
-          AND Prunit_Id = @prunitId
-          AND wr_shk = @locationId
-          AND (@sklad_id IS NULL AND id_scklad IS NULL OR id_scklad = @sklad_id)`;
-
-        logger.info('SQL запрос для обнуления количества:', updateQuery);
-
-        const updateRequest = this.pool.request()
-          .input('productId', productId)
-          .input('prunitId', prunitId)
-          .input('locationId', locationId)
-          .input('executor', executor)
-          .input('sklad_id', sklad_id || null);
-
-        await updateRequest.query(updateQuery);
-      } else {
-        // Обновляем количество товара в ячейке
-        let updateQuery = `
-          UPDATE [SPOe_rc].[dbo].[x_Storage_Full_Info]
-          SET Place_QNT = @newQuantity,
-              Update_Date = GETDATE(),
-              Executor = @executor
-          WHERE article = @productId
-          AND Prunit_Id = @prunitId
-          AND wr_shk = @locationId
-          AND (@sklad_id IS NULL AND id_scklad IS NULL OR id_scklad = @sklad_id)`;
-
-        logger.info('SQL запрос для обновления количества:', updateQuery);
-
-        const updateRequest = this.pool.request()
-          .input('productId', productId)
-          .input('prunitId', prunitId)
-          .input('locationId', locationId)
-          .input('newQuantity', newQuantity)
-          .input('executor', executor)
-          .input('sklad_id', sklad_id || null);
-
-        await updateRequest.query(updateQuery);
-      }
-
-      // Удаляем логирование операции
-      return {
-        locationId: locationId,
-        prunitId: prunitId,
-        name: item.name,
-        article: item.article,
-        shk: item.shk,
-        conditionState: item.condition_state,
-        previousQuantity: currentQuantity,
-        newQuantity: newQuantity,
-        pickedQuantity: actualRequestedQuantity,
-        requestedQuantity,
-        unitsPerPack,
-        pickedPacks: requestedPacks,
-        isDeleted: newQuantity <= 0,
-        productQnt: unitsPerPack
-      };
-    } catch (error) {
-      logger.error('Error in pickFromLocation:', error);
-      throw error;
-    }
+    // Старый endpoint снятия: делегируем в pickFromLocationBySkladId
+    return this.pickFromLocationBySkladId(data);
   }
 
   /**
@@ -704,36 +609,40 @@ class StorageRepository {
 
       logger.info('Забор товара из ячейки по sklad_id:', JSON.stringify(data));
 
-      // Проверяем наличие товара в указанной ячейке
-      let checkQuery = `
-        SELECT ID, Name, Article, SHK, Prunit_Id, Prunit_Name, Product_QNT, Place_QNT, id_scklad, Condition_State,
-               Expiration_Date, Start_Expiration_Date, End_Expiration_Date
-        FROM [SPOe_rc].[dbo].[x_Storage_Full_Info]
-        WHERE article = @productId
-          AND Prunit_Id = @prunitId
-          AND WR_SHK = @locationId
-      `;
+      const cell = await this.resolveCell(locationId, sklad_id);
 
-      // Если указан sklad_id, добавляем условие
-      if (sklad_id) {
-        checkQuery += ` AND id_scklad = @sklad_id`;
-      }
+      // Ищем по ШК ячейки или по имени (18-05-06). Prunit и склад — предпочтение, не жёсткий фильтр.
+      const checkQuery = `
+        SELECT TOP 1 ID, Name, Article, SHK, Prunit_Id, Prunit_Name, Product_QNT, Place_QNT, id_scklad, Condition_State,
+               Expiration_Date, Start_Expiration_Date, End_Expiration_Date, WR_SHK
+        FROM [SPOe_rc].[dbo].[x_Storage_Full_Info]
+        WHERE LTRIM(RTRIM(CAST(Article AS NVARCHAR(50)))) = LTRIM(RTRIM(CAST(@productId AS NVARCHAR(50))))
+          AND (
+            WR_SHK = @locationId OR WR_SHK = @wrShk
+            OR name_wr_shk = @locationId OR name_wr_shk = @cellName
+          )
+          AND Place_QNT > 0
+          AND ISNULL(reason, N'') <> N'Занято ЕХ паллетом'
+        ORDER BY
+          CASE WHEN @sklad_id IS NOT NULL AND id_scklad = @sklad_id THEN 0 ELSE 1 END,
+          CASE WHEN Prunit_Id = @prunitId THEN 0 ELSE 1 END,
+          CASE WHEN WR_SHK = @wrShk THEN 0 ELSE 1 END
+      `;
 
       logger.info('SQL запрос для проверки наличия товара:', checkQuery);
 
       const checkRequest = this.pool.request()
         .input('productId', productId)
         .input('prunitId', prunitId)
-        .input('locationId', locationId);
-
-      if (sklad_id) {
-        checkRequest.input('sklad_id', sklad_id);
-      }
+        .input('locationId', locationId)
+        .input('wrShk', cell.shk)
+        .input('cellName', cell.name)
+        .input('sklad_id', sklad_id || null);
 
       const result = await checkRequest.query(checkQuery);
 
       if (result.recordset.length === 0) {
-        logger.warn('Товар не найден в указанной ячейке');
+        logger.warn('Товар не найден в указанной ячейке', { productId, locationId, cell });
         return null;
       }
 
@@ -748,71 +657,53 @@ class StorageRepository {
         expirationDate = startExpirationDate;
       }
 
-      // Получаем количество в упаковке и общее количество упаковок
-      const unitsPerPack = parseFloat(item.Product_QNT) || 0;
+      // Вложенность ЕХ: из запроса или из БД, 0 не используем (иначе списание даёт 0)
+      let unitsPerPack = parseFloat(productQnt);
+      if (!unitsPerPack || unitsPerPack <= 0) {
+        unitsPerPack = parseFloat(item.Product_QNT) || 1;
+      }
+      if (unitsPerPack <= 0) {
+        unitsPerPack = 1;
+      }
       const currentQuantity = parseFloat(item.Place_QNT) || 0;
       const requestedQuantity = parseFloat(quantity) || 0;
-      // Используем productQnt если он передан, иначе используем unitsPerPack из базы данных
-      const actualUnitsPerPack = productQnt ? parseFloat(productQnt) : unitsPerPack;
-      // Вычисляем фактическое количество, которое нужно снять (умножаем количество на единицы в упаковке)
-      const actualRequestedQuantity = requestedQuantity * actualUnitsPerPack;
+      const actualRequestedQuantity = requestedQuantity * unitsPerPack;
 
       logger.info('Расчет количества:', {
         unitsPerPack,
-        actualUnitsPerPack,
         currentQuantity,
         requestedQuantity,
         actualRequestedQuantity,
-        expirationDate
+        expirationDate,
+        recordId: item.ID
       });
 
       if (currentQuantity < actualRequestedQuantity) {
         logger.warn(`Недостаточное количество товара: доступно ${currentQuantity}, запрошено ${actualRequestedQuantity}`);
-        return { 
-          error: 'insufficient_quantity', 
+        return {
+          error: 'insufficient_quantity',
           available: currentQuantity,
-          availablePacks: Math.floor(currentQuantity / actualUnitsPerPack),
-          unitsPerPack: actualUnitsPerPack
+          availablePacks: Math.floor(currentQuantity / unitsPerPack),
+          unitsPerPack
         };
       }
 
       const newQuantity = currentQuantity - actualRequestedQuantity;
+      const recordId = item.ID;
 
       if (newQuantity <= 0) {
-        // Если количество становится нулевым или отрицательным, удаляем запись
-        logger.info('Количество товара стало нулевым, удаляем запись');
+        logger.info('Количество товара стало нулевым, удаляем запись по ID:', recordId);
 
-        let deleteQuery = `
-          DELETE FROM [SPOe_rc].[dbo].[x_Storage_Full_Info]
-          WHERE article = @productId
-          AND Prunit_Id = @prunitId
-          AND WR_SHK = @locationId
-        `;
-
-        // Если указан sklad_id, добавляем условие
-        if (sklad_id) {
-          deleteQuery += ` AND id_scklad = @sklad_id`;
-        }
-
-        logger.info('SQL запрос для удаления записи:', deleteQuery);
-
-        const deleteRequest = this.pool.request()
-          .input('productId', productId)
-          .input('prunitId', prunitId)
-          .input('locationId', locationId);
-
-        if (sklad_id) {
-          deleteRequest.input('sklad_id', sklad_id);
-        }
-
-        await deleteRequest.query(deleteQuery);
+        await this.pool.request()
+          .input('id', recordId)
+          .query(`DELETE FROM [SPOe_rc].[dbo].[x_Storage_Full_Info] WHERE ID = @id`);
 
         await this.logStorageOperation({
           operationType: 'PICK',
           productId: item.Article || productId,
           productName: item.Name,
-          prunitId: prunitId,
-          fromLocationId: locationId,
+          prunitId: item.Prunit_Id || prunitId,
+          fromLocationId: item.WR_SHK || locationId,
           toLocationId: null,
           quantity: actualRequestedQuantity,
           expirationDate: expirationDate,
@@ -822,8 +713,8 @@ class StorageRepository {
 
         return {
           success: true,
-          locationId: locationId,
-          prunitId: prunitId,
+          locationId: item.WR_SHK || locationId,
+          prunitId: item.Prunit_Id || prunitId,
           name: item.Name,
           article: item.Article,
           shk: item.SHK,
@@ -833,73 +724,56 @@ class StorageRepository {
           newQuantity: 0,
           pickedQuantity: actualRequestedQuantity,
           requestedQuantity,
-          unitsPerPack: actualUnitsPerPack,
+          unitsPerPack,
           pickedPacks: requestedQuantity,
           isDeleted: true
         };
-      } else {
-        // Обновляем количество товара в ячейке
-        let updateQuery = `
+      }
+
+      logger.info('SQL запрос для обновления количества по ID:', recordId);
+
+      await this.pool.request()
+        .input('id', recordId)
+        .input('newQuantity', newQuantity)
+        .input('executor', executor)
+        .query(`
           UPDATE [SPOe_rc].[dbo].[x_Storage_Full_Info]
           SET Place_QNT = @newQuantity,
               Update_Date = GETDATE(),
               Executor = @executor
-          WHERE article = @productId
-          AND Prunit_Id = @prunitId
-          AND WR_SHK = @locationId
-        `;
+          WHERE ID = @id
+        `);
 
-        // Если указан sklad_id, добавляем условие
-        if (sklad_id) {
-          updateQuery += ` AND id_scklad = @sklad_id`;
-        }
+      await this.logStorageOperation({
+        operationType: 'PICK',
+        productId: item.Article || productId,
+        productName: item.Name,
+        prunitId: item.Prunit_Id || prunitId,
+        fromLocationId: item.WR_SHK || locationId,
+        toLocationId: null,
+        quantity: actualRequestedQuantity,
+        expirationDate: expirationDate,
+        conditionState: item.Condition_State,
+        executor: executor
+      });
 
-        logger.info('SQL запрос для обновления количества:', updateQuery);
-
-        const updateRequest = this.pool.request()
-          .input('productId', productId)
-          .input('prunitId', prunitId)
-          .input('locationId', locationId)
-          .input('newQuantity', newQuantity)
-          .input('executor', executor);
-
-        if (sklad_id) {
-          updateRequest.input('sklad_id', sklad_id);
-        }
-
-        await updateRequest.query(updateQuery);
-
-        await this.logStorageOperation({
-          operationType: 'PICK',
-          productId: item.Article || productId,
-          productName: item.Name,
-          prunitId: prunitId,
-          fromLocationId: locationId,
-          toLocationId: null,
-          quantity: actualRequestedQuantity,
-          expirationDate: expirationDate,
-          conditionState: item.Condition_State,
-          executor: executor
-        });
-
-        return {
-          success: true,
-          locationId: locationId,
-          prunitId: prunitId,
-          name: item.Name,
-          article: item.Article,
-          shk: item.SHK,
-          conditionState: item.Condition_State,
-          expirationDate: expirationDate,
-          previousQuantity: currentQuantity,
-          newQuantity: newQuantity,
-          pickedQuantity: actualRequestedQuantity,
-          requestedQuantity,
-          unitsPerPack: actualUnitsPerPack,
-          pickedPacks: requestedQuantity,
-          isDeleted: false
-        };
-      }
+      return {
+        success: true,
+        locationId: item.WR_SHK || locationId,
+        prunitId: item.Prunit_Id || prunitId,
+        name: item.Name,
+        article: item.Article,
+        shk: item.SHK,
+        conditionState: item.Condition_State,
+        expirationDate: expirationDate,
+        previousQuantity: currentQuantity,
+        newQuantity: newQuantity,
+        pickedQuantity: actualRequestedQuantity,
+        requestedQuantity,
+        unitsPerPack,
+        pickedPacks: requestedQuantity,
+        isDeleted: false
+      };
     } catch (error) {
       logger.error('Error in pickFromLocationBySkladId:', error);
       throw error;
@@ -913,7 +787,8 @@ class StorageRepository {
     try {
       logger.info(`Получение списка товаров в ячейке: ${locationId}${id_scklad ? `, склад: ${id_scklad}` : ''}`);
 
-      // Создаем базовый запрос
+      const cell = await this.resolveCell(locationId, id_scklad);
+
       let query = `
         SELECT
           id,
@@ -933,8 +808,12 @@ class StorageRepository {
           end_expiration_date,
           name_wr_shk
         FROM [SPOe_rc].[dbo].[x_Storage_Full_Info]
-        WHERE WR_SHK = @locationId
-        AND product_qnt > 0
+        WHERE (
+          WR_SHK = @locationId OR WR_SHK = @wrShk
+          OR name_wr_shk = @locationId OR name_wr_shk = @cellName
+        )
+        AND Place_QNT > 0
+        AND ISNULL(reason, N'') <> N'Занято ЕХ паллетом'
       `;
 
       // Добавляем условие по id_scklad, если оно указано
@@ -946,7 +825,9 @@ class StorageRepository {
 
       // Создаем параметризованный запрос
       const request = this.pool.request()
-        .input('locationId', locationId);
+        .input('locationId', locationId)
+        .input('wrShk', cell.shk)
+        .input('cellName', cell.name);
 
       // Добавляем параметр id_scklad, если он указан
       if (id_scklad) {
@@ -1071,23 +952,36 @@ class StorageRepository {
     try {
       logger.info('Логирование операции:', JSON.stringify(data));
 
+      const parsedPrunit = data.prunitId != null && data.prunitId !== ''
+        ? parseInt(String(data.prunitId), 10)
+        : null;
+      const parsedQty = data.quantity != null && data.quantity !== ''
+        ? parseFloat(data.quantity)
+        : null;
+      let parsedExp = null;
+      if (data.expirationDate) {
+        const d = new Date(data.expirationDate);
+        parsedExp = Number.isNaN(d.getTime()) ? null : d;
+      }
+
+      // Типы обязательны: mssql падает на null без sql.Int / sql.DateTime, и история молча не пишется
       const bindCommon = (request) => {
         request
-          .input('operationType', sql.NVarChar, data.operationType)
-          .input('productId', sql.NVarChar, data.productId ? data.productId.toString() : null)
-          .input('prunitId', data.prunitId != null ? data.prunitId : null)
-          .input('fromLocationId', sql.NVarChar, data.fromLocationId ? data.fromLocationId.toString() : null)
-          .input('toLocationId', sql.NVarChar, data.toLocationId ? data.toLocationId.toString() : null)
-          .input('quantity', data.quantity != null ? data.quantity : null)
-          .input('conditionState', sql.NVarChar, data.conditionState || null)
-          .input('executor', sql.NVarChar, data.executor || null)
-          .input('expirationDate', data.expirationDate || null);
+          .input('operationType', sql.NVarChar(20), data.operationType || null)
+          .input('productId', sql.NVarChar(100), data.productId != null ? String(data.productId) : null)
+          .input('prunitId', sql.Int, Number.isFinite(parsedPrunit) ? parsedPrunit : null)
+          .input('fromLocationId', sql.NVarChar(100), data.fromLocationId != null ? String(data.fromLocationId) : null)
+          .input('toLocationId', sql.NVarChar(100), data.toLocationId != null ? String(data.toLocationId) : null)
+          .input('quantity', sql.Float, Number.isFinite(parsedQty) ? parsedQty : null)
+          .input('conditionState', sql.NVarChar(100), data.conditionState || null)
+          .input('executor', sql.NVarChar(100), data.executor || null)
+          .input('expirationDate', sql.DateTime, parsedExp);
         return request;
       };
 
       try {
         const request = bindCommon(this.pool.request())
-          .input('productName', sql.NVarChar, data.productName || null);
+          .input('productName', sql.NVarChar(500), data.productName ? String(data.productName).slice(0, 500) : null);
 
         const result = await request.query(`
           INSERT INTO [SPOe_rc].[dbo].[x_Storage_Operations]
@@ -1143,7 +1037,11 @@ class StorageRepository {
           request.input('dateFrom', sql.DateTime, new Date(filters.date_from));
         }
         if (filters.date_to) {
-          request.input('dateTo', sql.DateTime, new Date(filters.date_to));
+          // date_to с фронта — ISO UTC, executedAt пишется GETDATE() (локальное время SQL).
+          // Без запаса «последние 24ч» отрезают свежие операции на величину часового пояса.
+          const dateTo = new Date(filters.date_to);
+          dateTo.setTime(dateTo.getTime() + 24 * 60 * 60 * 1000);
+          request.input('dateTo', sql.DateTime, dateTo);
         }
         return request;
       };
@@ -1443,7 +1341,8 @@ class StorageRepository {
     try {
       logger.info(`Получение детальной информации о ячейке: ${locationId}${id_scklad ? `, склад: ${id_scklad}` : ''}`);
 
-      // Получаем информацию о ячейке
+      const cell = await this.resolveCell(locationId, id_scklad);
+
       const locationQuery = `
         SELECT DISTINCT
           WR_SHK as locationId,
@@ -1452,13 +1351,19 @@ class StorageRepository {
           SUM(product_qnt) OVER() as totalQuantity,
           COUNT(DISTINCT article) OVER() as uniqueArticles
         FROM [SPOe_rc].[dbo].[x_Storage_Full_Info]
-        WHERE WR_SHK = @locationId
+        WHERE (
+          WR_SHK = @locationId OR WR_SHK = @wrShk
+          OR name_wr_shk = @locationId OR name_wr_shk = @cellName
+        )
         ${id_scklad ? 'AND id_scklad = @id_scklad' : ''}
-        AND product_qnt > 0
+        AND Place_QNT > 0
+        AND ISNULL(reason, N'') <> N'Занято ЕХ паллетом'
       `;
 
       const locationRequest = this.pool.request()
-        .input('locationId', locationId);
+        .input('locationId', locationId)
+        .input('wrShk', cell.shk)
+        .input('cellName', cell.name);
 
       if (id_scklad) {
         locationRequest.input('id_scklad', id_scklad);
@@ -1470,7 +1375,8 @@ class StorageRepository {
       if (locationResult.recordset.length === 0) {
         logger.warn(`Ячейка ${locationId} не найдена или пуста`);
         return {
-          locationId,
+          locationId: cell.shk,
+          locationName: cell.name,
           skladId: id_scklad || null,
           totalItems: 0,
           totalQuantity: 0,
@@ -1507,7 +1413,8 @@ class StorageRepository {
       });
 
       return {
-        locationId: locationInfo.locationId,
+        locationId: cell.shk || locationInfo.locationId,
+        locationName: cell.name,
         skladId: locationInfo.skladId,
         totalItems: locationInfo.totalItems,
         totalQuantity: locationInfo.totalQuantity,
