@@ -657,15 +657,15 @@ class StorageRepository {
         expirationDate = startExpirationDate;
       }
 
-      // Вложенность ЕХ: из запроса или из БД, 0 не используем (иначе списание даёт 0)
-      let unitsPerPack = parseFloat(productQnt);
+      // Вложенность ЕХ берём из строки БД. Клиент часто шлёт Place_QNT вместо Product_QNT.
+      const currentQuantity = parseFloat(item.Place_QNT) || 0;
+      let unitsPerPack = parseFloat(item.Product_QNT);
       if (!unitsPerPack || unitsPerPack <= 0) {
-        unitsPerPack = parseFloat(item.Product_QNT) || 1;
+        unitsPerPack = parseFloat(productQnt) || 1;
       }
       if (unitsPerPack <= 0) {
         unitsPerPack = 1;
       }
-      const currentQuantity = parseFloat(item.Place_QNT) || 0;
       const requestedQuantity = parseFloat(quantity) || 0;
       const actualRequestedQuantity = requestedQuantity * unitsPerPack;
 
@@ -797,8 +797,8 @@ class StorageRepository {
           shk,
           prunit_id,
           prunit_name,
-          product_qnt,
-          place_qnt,
+          Product_QNT AS product_qnt,
+          Place_QNT AS place_qnt,
           id_scklad,
           wr_shk,
           condition_state,

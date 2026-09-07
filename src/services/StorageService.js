@@ -650,14 +650,14 @@ class StorageService {
         }
 
         groupedItems[item.id].units.push({
-          prunitId: item.prunit_id,
-          prunitName: item.prunit_name,
-          quantity: item.place_qnt,
+          prunitId: item.prunit_id ?? item.Prunit_Id,
+          prunitName: item.prunit_name ?? item.Prunit_Name,
+          quantity: item.place_qnt ?? item.Place_QNT,
           name_wr_shk: item.name_wr_shk,
-          productQnt: item.product_qnt,
-          conditionState: item.condition_state,
+          productQnt: item.product_qnt ?? item.Product_QNT,
+          conditionState: item.condition_state ?? item.Condition_State,
           reason: item.reason || null,
-          expirationDate: item.expiration_date
+          expirationDate: item.expiration_date ?? item.Expiration_Date
         });
       });
 
