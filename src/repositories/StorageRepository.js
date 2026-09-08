@@ -789,24 +789,27 @@ class StorageRepository {
 
       const cell = await this.resolveCell(locationId, id_scklad);
 
+      // Все строковые поля отдаём через ISNULL('') — товары без ШК (SHK IS NULL)
+      // должны показываться при инвентаризации так же, как остальные.
+      // NULL в этих полях ломал разбор ответа/запись в БД на мобильном клиенте.
       let query = `
         SELECT
           id,
-          name,
-          article,
-          shk,
+          ISNULL(name, N'')            AS name,
+          ISNULL(article, N'')         AS article,
+          ISNULL(shk, N'')             AS shk,
           prunit_id,
-          prunit_name,
-          Product_QNT AS product_qnt,
-          Place_QNT AS place_qnt,
+          ISNULL(prunit_name, N'')     AS prunit_name,
+          ISNULL(Product_QNT, N'')     AS product_qnt,
+          Place_QNT                    AS place_qnt,
           id_scklad,
-          wr_shk,
-          condition_state,
-          reason,
+          ISNULL(wr_shk, N'')          AS wr_shk,
+          ISNULL(condition_state, N'') AS condition_state,
+          ISNULL(reason, N'')          AS reason,
           expiration_date,
           start_expiration_date,
           end_expiration_date,
-          name_wr_shk
+          ISNULL(name_wr_shk, N'')     AS name_wr_shk
         FROM [SPOe_rc].[dbo].[x_Storage_Full_Info]
         WHERE (
           WR_SHK = @locationId OR WR_SHK = @wrShk
@@ -2303,24 +2306,26 @@ class StorageRepository {
 
       const result = await request.query(query);
 
+      // Строковые поля отдаём без null (у товаров без ШК SHK IS NULL) —
+      // иначе разбор ответа на мобильном клиенте падает и товар «пропадает».
       return result.recordset.map(item => ({
         id: item.ID,
-        name: item.Name,
-        article: item.Article,
-        shk: item.SHK,
+        name: item.Name ?? '',
+        article: item.Article ?? '',
+        shk: item.SHK ?? '',
         productQnt: parseFloat(item.Product_QNT) || 0,
         placeQnt: parseFloat(item.Place_QNT) || 0,
         prunitId: item.Prunit_Id,
-        prunitName: item.Prunit_Name,
-        wrShk: item.WR_SHK,
+        prunitName: item.Prunit_Name ?? '',
+        wrShk: item.WR_SHK ?? '',
         idScklad: item.id_scklad,
-        conditionState: item.Condition_State,
+        conditionState: item.Condition_State ?? '',
         expirationDate: item.Expiration_Date,
         createDate: item.Create_Date,
         updateDate: item.Update_Date,
-        executor: item.Executor,
-        name_wr_shk: item.name_wr_shk,
-        reason:item.reason
+        executor: item.Executor ?? '',
+        name_wr_shk: item.name_wr_shk ?? '',
+        reason: item.reason ?? ''
       }));
     } catch (error) {
       throw error;
