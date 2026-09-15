@@ -2,6 +2,7 @@ const BaseRepository = require('./BaseRepository');
 const OperationLog = require('../models/OperationLog');
 const logger = require('../utils/logger');
 const { connectToDatabase, mssql } = require('../config/database');
+const { isoToMskSqlDate } = require('../utils/mskTime');
 
 /**
  * Репозиторий для работы с логами операций
@@ -35,7 +36,8 @@ class OperationLogRepository extends BaseRepository {
           execution_time_ms,
           executor,
           operation_result,
-          error_message
+          error_message,
+          created_at
         )
         VALUES (
           @endpoint,
@@ -49,7 +51,8 @@ class OperationLogRepository extends BaseRepository {
           @execution_time_ms,
           @executor,
           @operation_result,
-          @error_message
+          @error_message,
+          DATEADD(HOUR, 3, GETUTCDATE())
         );
         SELECT SCOPE_IDENTITY() AS id;
       `;
@@ -119,12 +122,12 @@ class OperationLogRepository extends BaseRepository {
 
       if (filters.date_from) {
         whereConditions.push('created_at >= @date_from');
-        params.date_from = filters.date_from;
+        params.date_from = isoToMskSqlDate(filters.date_from);
       }
 
       if (filters.date_to) {
         whereConditions.push('created_at <= @date_to');
-        params.date_to = filters.date_to;
+        params.date_to = isoToMskSqlDate(filters.date_to);
       }
 
       const whereClause = whereConditions.length > 0 
@@ -187,12 +190,12 @@ class OperationLogRepository extends BaseRepository {
 
       if (filters.date_from) {
         whereConditions.push('created_at >= @date_from');
-        params.date_from = filters.date_from;
+        params.date_from = isoToMskSqlDate(filters.date_from);
       }
 
       if (filters.date_to) {
         whereConditions.push('created_at <= @date_to');
-        params.date_to = filters.date_to;
+        params.date_to = isoToMskSqlDate(filters.date_to);
       }
 
       const whereClause = whereConditions.length > 0 
@@ -250,12 +253,12 @@ class OperationLogRepository extends BaseRepository {
 
       if (filters.date_from) {
         whereConditions.push('created_at >= @date_from');
-        params.date_from = filters.date_from;
+        params.date_from = isoToMskSqlDate(filters.date_from);
       }
 
       if (filters.date_to) {
         whereConditions.push('created_at <= @date_to');
-        params.date_to = filters.date_to;
+        params.date_to = isoToMskSqlDate(filters.date_to);
       }
 
       const whereClause = whereConditions.length > 0 

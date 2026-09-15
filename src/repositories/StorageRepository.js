@@ -2,6 +2,7 @@ const { connectToDatabase } = require('../config/database');
 const StorageItem = require('../models/StorageItem');
 const logger = require('../utils/logger');
 const sql = require('mssql');
+const { sqlDateTimeToMskIso, isoToMskSqlDate } = require('../utils/mskTime');
 
 class StorageRepository {
   constructor(pool) {
@@ -739,7 +740,7 @@ class StorageRepository {
         .query(`
           UPDATE [SPOe_rc].[dbo].[x_Storage_Full_Info]
           SET Place_QNT = @newQuantity,
-              Update_Date = GETDATE(),
+              Update_Date = DATEADD(HOUR, 3, GETUTCDATE()),
               Executor = @executor
           WHERE ID = @id
         `);
@@ -992,7 +993,7 @@ class StorageRepository {
            quantity, expirationDate, conditionState, executor, executedAt)
           VALUES
           (@operationType, @productId, @productName, @prunitId, @fromLocationId, @toLocationId,
-           @quantity, @expirationDate, @conditionState, @executor, GETDATE())
+           @quantity, @expirationDate, @conditionState, @executor, DATEADD(HOUR, 3, GETUTCDATE()))
         `);
         return result.rowsAffected[0] > 0;
       } catch (columnError) {
@@ -1005,7 +1006,7 @@ class StorageRepository {
            quantity, expirationDate, conditionState, executor, executedAt)
           VALUES
           (@operationType, @productId, @prunitId, @fromLocationId, @toLocationId,
-           @quantity, @expirationDate, @conditionState, @executor, GETDATE())
+           @quantity, @expirationDate, @conditionState, @executor, DATEADD(HOUR, 3, GETUTCDATE()))
         `);
         return result.rowsAffected[0] > 0;
       }
@@ -1037,14 +1038,10 @@ class StorageRepository {
           request.input('executor', sql.NVarChar, `%${filters.executor}%`);
         }
         if (filters.date_from) {
-          request.input('dateFrom', sql.DateTime, new Date(filters.date_from));
+          request.input('dateFrom', sql.DateTime, isoToMskSqlDate(filters.date_from));
         }
         if (filters.date_to) {
-          // date_to с фронта — ISO UTC, executedAt пишется GETDATE() (локальное время SQL).
-          // Без запаса «последние 24ч» отрезают свежие операции на величину часового пояса.
-          const dateTo = new Date(filters.date_to);
-          dateTo.setTime(dateTo.getTime() + 24 * 60 * 60 * 1000);
-          request.input('dateTo', sql.DateTime, dateTo);
+          request.input('dateTo', sql.DateTime, isoToMskSqlDate(filters.date_to));
         }
         return request;
       };
@@ -1150,7 +1147,10 @@ class StorageRepository {
       }
 
       return {
-        items: itemsResult.recordset,
+        items: itemsResult.recordset.map((row) => ({
+          ...row,
+          executedAt: sqlDateTimeToMskIso(row.executedAt)
+        })),
         total: countResult.recordset[0].total,
         limit: safeLimit,
         offset: safeOffset
@@ -1244,7 +1244,7 @@ class StorageRepository {
         const updateQuery = `
           UPDATE [SPOe_rc].[dbo].[x_Storage_Full_Info]
           SET Place_QNT = Place_QNT + @quantity,
-              Update_Date = GETDATE(),
+              Update_Date = DATEADD(HOUR, 3, GETUTCDATE()),
               Executor = @executor,
               Condition_State = @conditionState,
               Expiration_Date = @expirationDate,
@@ -1291,7 +1291,7 @@ class StorageRepository {
         (@id, @name, @article, @shk, @productQnt, @prunitName, @prunitId,
          @wrShk, @idScklad, @expirationDate, @startExpirationDate,
          @endExpirationDate, @executor, @placeQnt, @conditionState, @reason,
-         GETDATE(), GETDATE(), @nameWrShk)
+         DATEADD(HOUR, 3, GETUTCDATE()), DATEADD(HOUR, 3, GETUTCDATE()), @nameWrShk)
       `;
 
       await this.pool.request()
@@ -1563,7 +1563,7 @@ class StorageRepository {
          difference, executor, inventory_date, status, notes, id_scklad)
         VALUES
         (@locationId, @article, @prunitId, @systemQuantity, @actualQuantity,
-         @difference, @executor, GETDATE(), @status, @notes, @idScklad)
+         @difference, @executor, DATEADD(HOUR, 3, GETUTCDATE()), @status, @notes, @idScklad)
       `;
 
       const result = await this.pool.request()
@@ -1673,6 +1673,22 @@ class StorageRepository {
         // Создаем запись в таблице инвентаризации
         await this.createInventoryRecord(inventoryRecord);
 
+        // Логируем операцию в общую историю складских операций, чтобы инвентаризация
+        // была видна на странице "История операций" наравне с размещением/снятием
+        if (difference !== 0) {
+          await this.logStorageOperation({
+            operationType: 'INVENTORY',
+            productId: item.article,
+            productName: currentItem ? currentItem.name : item.name,
+            prunitId: item.prunitId,
+            fromLocationId: locationId,
+            toLocationId: locationId,
+            quantity: actualQuantity,
+            conditionState: currentItem ? currentItem.condition_state : item.conditionState,
+            executor
+          });
+        }
+
         // Если нужно обновить количества и есть расхождения
         if (updateQuantities && difference !== 0) {
           if (currentItem) {
@@ -1682,7 +1698,7 @@ class StorageRepository {
               const updateQuery = `
                 UPDATE [SPOe_rc].[dbo].[x_Storage_Full_Info]
                 SET Place_QNT = @actualQuantity,
-                    Update_Date = GETDATE(),
+                    Update_Date = DATEADD(HOUR, 3, GETUTCDATE()),
                     Executor = @executor
                 WHERE article = @article
                 AND Prunit_Id = @prunitId
@@ -1705,7 +1721,7 @@ class StorageRepository {
               const updateQuery = `
                 UPDATE [SPOe_rc].[dbo].[x_Storage_Full_Info]
                 SET Place_QNT = 0,
-                    Update_Date = GETDATE(),
+                    Update_Date = DATEADD(HOUR, 3, GETUTCDATE()),
                     Executor = @executor
                 WHERE article = @article
                 AND Prunit_Id = @prunitId
@@ -1745,7 +1761,7 @@ class StorageRepository {
                WR_SHK, id_scklad, Condition_State, Executor, Create_Date)
               VALUES
               (@newId, @name, @article, @shk, @quantity, @quantity, @prunitName, @prunitId,
-               @wrShk, @idScklad, @conditionState, @executor, GETDATE())
+               @wrShk, @idScklad, @conditionState, @executor, DATEADD(HOUR, 3, GETUTCDATE()))
             `;
 
             updatePromises.push(
@@ -1806,13 +1822,28 @@ class StorageRepository {
           // Создаем запись в таблице инвентаризации
           await this.createInventoryRecord(inventoryRecord);
 
+          // Логируем операцию в общую историю складских операций
+          if (systemQuantity !== 0) {
+            await this.logStorageOperation({
+              operationType: 'INVENTORY',
+              productId: currentItem.article,
+              productName: currentItem.name,
+              prunitId: currentItem.prunit_id,
+              fromLocationId: locationId,
+              toLocationId: locationId,
+              quantity: 0,
+              conditionState: currentItem.condition_state,
+              executor
+            });
+          }
+
           // Если нужно обновить количества
           if (updateQuantities) {
             // Устанавливаем place_qnt = 0
             const updateQuery = `
               UPDATE [SPOe_rc].[dbo].[x_Storage_Full_Info]
               SET Place_QNT = 0,
-                  Update_Date = GETDATE(),
+                  Update_Date = DATEADD(HOUR, 3, GETUTCDATE()),
                   Executor = @executor
               WHERE article = @article
               AND Prunit_Id = @prunitId
@@ -2094,7 +2125,7 @@ class StorageRepository {
         const updateSourceQuery = `
           UPDATE [SPOe_rc].[dbo].[x_Storage_Full_Info]
           SET Place_QNT = @newQuantity,
-              Update_Date = GETDATE(),
+              Update_Date = DATEADD(HOUR, 3, GETUTCDATE()),
               Executor = @executor
           WHERE ID = @id
         `;
@@ -2119,7 +2150,7 @@ class StorageRepository {
             UPDATE [SPOe_rc].[dbo].[x_Storage_Full_Info]
             SET Place_QNT = @newQuantity,
                 Product_QNT = @productQnt,
-                Update_Date = GETDATE(),
+                Update_Date = DATEADD(HOUR, 3, GETUTCDATE()),
                 Executor = @executor,
                 name_wr_shk = @nameWrShk,
                 reason = @reason
@@ -2157,7 +2188,7 @@ class StorageRepository {
              name_wr_shk, reason)
             VALUES
             (@newId, @name, @article, @shk, @productQnt, @quantity, @prunitName, @prunitId,
-             @wrShk, @idScklad, @conditionState, @expirationDate, @executor, GETDATE(),
+             @wrShk, @idScklad, @conditionState, @expirationDate, @executor, DATEADD(HOUR, 3, GETUTCDATE()),
              @nameWrShk, @reason)
           `;
 
@@ -2321,8 +2352,8 @@ class StorageRepository {
         idScklad: item.id_scklad,
         conditionState: item.Condition_State ?? '',
         expirationDate: item.Expiration_Date,
-        createDate: item.Create_Date,
-        updateDate: item.Update_Date,
+        createDate: sqlDateTimeToMskIso(item.Create_Date),
+        updateDate: sqlDateTimeToMskIso(item.Update_Date),
         executor: item.Executor ?? '',
         name_wr_shk: item.name_wr_shk ?? '',
         reason: item.reason ?? ''
@@ -2482,7 +2513,7 @@ class StorageRepository {
           (@id, @name, @article, @shk, 0, N'ЕХ', 11,
            @wrShk, @idScklad, @expirationDate, @expirationDate,
            @expirationDate, @executor, 1, N'кондиция', N'Занято ЕХ паллетом',
-           GETDATE(), GETDATE(), @nameWrShk)
+           DATEADD(HOUR, 3, GETUTCDATE()), DATEADD(HOUR, 3, GETUTCDATE()), @nameWrShk)
         `);
       return true;
     } catch (error) {
@@ -2501,7 +2532,7 @@ class StorageRepository {
    */
   async getAllStorageInfo(params = {}) {
     try {
-      const { limit = 100000, offset = 0, id_sklad } = params;
+      const { limit = 100000, offset = 0, id_sklad, includeZero = false } = params;
 
       // Строим базовый запрос
       let countQuery = `
@@ -2523,6 +2554,12 @@ class StorageRepository {
         countQuery += ` AND id_scklad = @id_sklad`;
         dataQuery += ` AND id_scklad = @id_sklad`;
         request.input('id_sklad', id_sklad);
+      }
+
+      // Скрываем ячейки, обнулённые инвентаризацией (Place_QNT = 0), если явно не запрошено иное
+      if (!includeZero) {
+        countQuery += ` AND Place_QNT > 0`;
+        dataQuery += ` AND Place_QNT > 0`;
       }
 
       // Добавляем сортировку и пагинацию
@@ -2556,8 +2593,8 @@ class StorageRepository {
           idScklad: item.id_scklad,
           conditionState: item.Condition_State,
           expirationDate: item.Expiration_Date,
-          createDate: item.Create_Date,
-          updateDate: item.Update_Date,
+          createDate: sqlDateTimeToMskIso(item.Create_Date),
+          updateDate: sqlDateTimeToMskIso(item.Update_Date),
           executor: item.Executor,
           reason: item.reason,
           name_wr_shk: item.name_wr_shk

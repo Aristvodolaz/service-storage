@@ -1268,12 +1268,13 @@ class StorageController {
    */
   async getAllStorageInfo(req, res) {
     try {
-      const { limit, offset, id_sklad } = req.query;
+      const { limit, offset, id_sklad, includeZero } = req.query;
 
       const result = await storageService.getAllStorageInfo({
         limit,
         offset,
-        id_sklad
+        id_sklad,
+        includeZero
       });
 
       if (!result.success) {

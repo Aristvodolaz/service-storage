@@ -1,3 +1,5 @@
+const { sqlDateTimeToMskIso } = require('../utils/mskTime');
+
 /**
  * Модель лога операции API
  */
@@ -39,7 +41,7 @@ class OperationLog {
       executor: dbData.executor,
       operation_result: dbData.operation_result,
       error_message: dbData.error_message,
-      created_at: dbData.created_at
+      created_at: require('../utils/mskTime').sqlDateTimeToMskIso(dbData.created_at)
     });
   }
 

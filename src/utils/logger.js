@@ -9,8 +9,10 @@ if (!fs.existsSync(logDir)) {
 }
 
 // Настройка форматирования логов
+const { mskTimestamp } = require('./mskTime');
+
 const logFormat = winston.format.combine(
-  winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
+  winston.format.timestamp({ format: () => mskTimestamp() }),
   winston.format.errors({ stack: true }),
   winston.format.splat(),
   winston.format.printf(({ level, message, timestamp, stack }) => {

@@ -104,7 +104,7 @@ router.get('/search', [
  *         description: Внутренняя ошибка сервера
  */
 router.get('/operations', [
-  query('operationType').optional().isIn(['PLACE', 'MOVE', 'PICK']),
+  query('operationType').optional().isIn(['PLACE', 'MOVE', 'PICK', 'INVENTORY']),
   query('productId').optional().isString().trim(),
   query('locationId').optional().isString().trim(),
   query('executor').optional().isString().trim(),

@@ -177,8 +177,8 @@ class StorageService {
             quantity: record.Place_QNT,
             conditionState: record.Condition_State,
             expirationDate: record.Expiration_Date,
-            createdAt: record.Create_Date,
-            updatedAt: record.Update_Date,
+            createdAt: sqlDateTimeToMskIso(record.Create_Date),
+            updatedAt: sqlDateTimeToMskIso(record.Update_Date),
             idScklad: record.id_scklad
           });
         }
@@ -1709,12 +1709,13 @@ class StorageService {
         await this.initialize();
       }
 
-      const { limit, offset, id_sklad } = params;
+      const { limit, offset, id_sklad, includeZero } = params;
 
       const result = await this.repository.getAllStorageInfo({
         limit: parseInt(limit) || 1000,
         offset: parseInt(offset) || 0,
-        id_sklad
+        id_sklad,
+        includeZero: includeZero === true || includeZero === 'true'
       });
 
       return {
