@@ -97,6 +97,8 @@ class StorageRepository {
                 COALESCE(a.qnt_in_pallet, 0) as qnt_in_pallet
               FROM wms.article a
               WHERE a.PIECE_GTIN = ''${shk}''
+                            AND a.article_id_real = a.id'
+
             )
           )
           SELECT
@@ -122,6 +124,8 @@ class StorageRepository {
                 COALESCE(a.qnt_in_pallet, 0) as qnt_in_pallet
               FROM wms.article a
               WHERE a.id = ''${article}''
+                            AND a.article_id_real = a.id'
+
             )
           )
           SELECT
