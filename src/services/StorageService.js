@@ -1787,12 +1787,27 @@ class StorageService {
         };
       }
 
+      // Пишем в историю складских операций — иначе инвентаризация, проведённая
+      // через это (мобильное) API, нигде не появляется на сайте.
+      await this.repository.logStorageOperation({
+        operationType: 'INVENTORY',
+        productId: existingRecord.Article,
+        productName: existingRecord.Name,
+        prunitId: existingRecord.Prunit_Id,
+        fromLocationId: existingRecord.WR_SHK,
+        toLocationId: existingRecord.WR_SHK,
+        quantity: quantity !== undefined ? quantity : existingRecord.Place_QNT,
+        expirationDate: expirationDate !== undefined ? expirationDate : existingRecord.Expiration_Date,
+        conditionState: conditionState !== undefined ? conditionState : existingRecord.Condition_State,
+        executor
+      });
+
       return {
         success: true,
         msg: 'Данные инвентаризации успешно обновлены',
         data: {
           id,
-          updatedFields: Object.keys(updateData).filter(key => 
+          updatedFields: Object.keys(updateData).filter(key =>
             !['id', 'executor', 'update_date'].includes(key)
           )
         }

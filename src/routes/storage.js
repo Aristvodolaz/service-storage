@@ -1561,7 +1561,12 @@ router.post('/inventory', [
   body('id').isString().trim().notEmpty(),
   body('quantity').optional().isFloat({ min: 0 }),
   body('expirationDate').optional().custom(value => {
-    return value === null || !isNaN(Date.parse(value));
+    if (value === null) return true;
+    // Мобильное приложение шлёт дату в формате "Jan  1 2999 12:00AM" (без пробела
+    // перед AM/PM) — это нативный формат вывода SQL Server, но Date.parse из JS
+    // такую строку не распознаёт и возвращает NaN. Нормализуем перед проверкой.
+    const normalized = String(value).replace(/(\d)(AM|PM)$/i, '$1 $2');
+    return !isNaN(Date.parse(normalized));
   }),
   body('conditionState').optional().isIn(['кондиция', 'некондиция']),
   body('reason').optional().isString(),
