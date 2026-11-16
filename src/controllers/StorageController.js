@@ -1347,6 +1347,7 @@ class StorageController {
         executor,
         date_from,
         date_to,
+        id_sklad,
         limit = 100,
         offset = 0
       } = req.query;
@@ -1358,6 +1359,7 @@ class StorageController {
       if (executor) filters.executor = executor;
       if (date_from) filters.date_from = date_from;
       if (date_to) filters.date_to = date_to;
+      if (id_sklad) filters.id_sklad = id_sklad;
 
       const result = await storageService.getStorageOperations(
         filters,

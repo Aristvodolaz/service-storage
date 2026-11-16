@@ -3,6 +3,12 @@ const router = express.Router();
 const storageController = require('../controllers/StorageController');
 const { query, param, body } = require('express-validator');
 const { validate } = require('../middlewares/validator');
+const { createIdempotencyMiddleware } = require('../middlewares/idempotency');
+const IdempotencyRepository = require('../repositories/IdempotencyRepository');
+const logger = require('../utils/logger');
+
+// Повторная отправка записи (клиент не получил ответ) не должна выполнить операцию дважды
+const idempotency = createIdempotencyMiddleware(new IdempotencyRepository(), logger);
 
 /**
  * @swagger
@@ -110,6 +116,7 @@ router.get('/operations', [
   query('executor').optional().isString().trim(),
   query('date_from').optional().isISO8601(),
   query('date_to').optional().isISO8601(),
+  query('id_sklad').optional().isInt(),
   query('limit').optional().isInt({ min: 1, max: 1000 }),
   query('offset').optional().isInt({ min: 0 }),
   validate
@@ -418,7 +425,7 @@ router.post('/:productId/pick', [
  *       500:
  *         description: Внутренняя ошибка сервера
  */
-router.post('/:productId/buffer', [
+router.post('/:productId/buffer', idempotency, [
   param('productId').isString().trim().notEmpty(),
   body('prunitId').custom(value => {
     // Принимаем как строки, так и числа
@@ -625,7 +632,7 @@ router.post('/:productId/buffer/out', [
  *       500:
  *         description: Внутренняя ошибка сервера
  */
-router.post('/:productId/buffer/move', [
+router.post('/:productId/buffer/move', idempotency, [
   param('productId').isString().trim().notEmpty(),
   body('sourceLocationId').isString().trim().notEmpty(),
   body('targetLocationId').isString().trim().notEmpty(),
@@ -737,7 +744,7 @@ router.post('/:productId/buffer/move', [
  *       500:
  *         description: Внутренняя ошибка сервера
  */
-router.post('/pick-from-location-by-sklad-id', [
+router.post('/pick-from-location-by-sklad-id', idempotency, [
   body('productId').isString().notEmpty(),
   body('WR_SHK').isString().notEmpty(),
   body('prunitId').isString().notEmpty(),
