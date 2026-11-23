@@ -22,6 +22,9 @@ app.use((req, res, next) => {
   next();
 });
 
+// ТехВП: проксирование до парсеров тела, чтобы потоки запросов не были съедены
+app.use('/techvp', require('./routes/techvp'));
+
 // Middleware
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
