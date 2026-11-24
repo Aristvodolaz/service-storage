@@ -1184,19 +1184,33 @@ class StorageRepository {
         where.push('o.executedAt <= @dateTo');
         request.input('dateTo', sql.DateTime, isoToMskSqlDate(filters.date_to));
       }
-      if (filters.id_sklad) {
-        where.push(`EXISTS (SELECT 1 FROM [SPOe_rc].[dbo].[x_Storage_Scklads] s WHERE s.WR_House = @idSklad AND (s.shk = o.fromLocationId OR s.shk = o.toLocationId))`);
-        request.input('idSklad', sql.NVarChar, String(filters.id_sklad));
-      }
-
+      // Группируем по паре ячеек и фильтруем по складу в памяти: EXISTS по ячейкам на большой таблице занимает ~10 с
       const result = await request.query(`
-        SELECT o.executor, o.operationType, COUNT(*) AS cnt
+        SELECT o.executor, o.operationType, o.fromLocationId, o.toLocationId, COUNT(*) AS cnt
         FROM [SPOe_rc].[dbo].[x_Storage_Operations] o
         ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
-        GROUP BY o.executor, o.operationType
+        GROUP BY o.executor, o.operationType, o.fromLocationId, o.toLocationId
       `);
 
-      return result.recordset;
+      let rows = result.recordset;
+      if (filters.id_sklad) {
+        const cellRes = await this.pool.request()
+          .input('idSklad', sql.NVarChar, String(filters.id_sklad))
+          .query(`SELECT DISTINCT shk FROM [SPOe_rc].[dbo].[x_Storage_Scklads] WHERE WR_House = @idSklad`);
+        // trim/upper: SQL сравнивает без учета пробелов в конце и регистра
+        const norm = (v) => (v == null ? null : String(v).trim().toUpperCase());
+        const cells = new Set(cellRes.recordset.map((c) => norm(c.shk)));
+        rows = rows.filter((r) => cells.has(norm(r.fromLocationId)) || cells.has(norm(r.toLocationId)));
+      }
+
+      const agg = new Map();
+      for (const r of rows) {
+        const key = `${r.executor}\u0000${r.operationType}`;
+        const cur = agg.get(key) || { executor: r.executor, operationType: r.operationType, cnt: 0 };
+        cur.cnt += r.cnt;
+        agg.set(key, cur);
+      }
+      return [...agg.values()];
     } catch (error) {
       logger.error('Ошибка при получении выработки по исполнителям:', error);
       throw error;
