@@ -37,6 +37,7 @@ class OperationLogRepository extends BaseRepository {
           executor,
           operation_result,
           error_message,
+          id_sklad,
           created_at
         )
         VALUES (
@@ -52,6 +53,7 @@ class OperationLogRepository extends BaseRepository {
           @executor,
           @operation_result,
           @error_message,
+          @id_sklad,
           DATEADD(HOUR, 3, GETUTCDATE())
         );
         SELECT SCOPE_IDENTITY() AS id;
@@ -70,6 +72,7 @@ class OperationLogRepository extends BaseRepository {
       request.input('executor', mssql.NVarChar(100), data.executor);
       request.input('operation_result', mssql.NVarChar(20), data.operation_result);
       request.input('error_message', mssql.NVarChar(mssql.MAX), data.error_message);
+      request.input('id_sklad', mssql.Int, data.id_sklad);
 
       const result = await request.query(query);
       const insertedId = result.recordset[0].id;
@@ -108,6 +111,11 @@ class OperationLogRepository extends BaseRepository {
       if (filters.executor) {
         whereConditions.push('executor = @executor');
         params.executor = filters.executor;
+      }
+
+      if (filters.id_sklad) {
+        whereConditions.push('id_sklad = @id_sklad');
+        params.id_sklad = filters.id_sklad;
       }
 
       if (filters.status_code) {
@@ -178,6 +186,11 @@ class OperationLogRepository extends BaseRepository {
         params.executor = filters.executor;
       }
 
+      if (filters.id_sklad) {
+        whereConditions.push('id_sklad = @id_sklad');
+        params.id_sklad = filters.id_sklad;
+      }
+
       if (filters.status_code) {
         whereConditions.push('status_code = @status_code');
         params.status_code = filters.status_code;
@@ -239,6 +252,11 @@ class OperationLogRepository extends BaseRepository {
       if (filters.executor) {
         whereConditions.push('executor = @executor');
         params.executor = filters.executor;
+      }
+
+      if (filters.id_sklad) {
+        whereConditions.push('id_sklad = @id_sklad');
+        params.id_sklad = filters.id_sklad;
       }
 
       if (filters.status_code) {

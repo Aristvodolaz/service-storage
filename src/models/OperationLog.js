@@ -18,6 +18,7 @@ class OperationLog {
     this.executor = data.executor || null;
     this.operation_result = data.operation_result || null;
     this.error_message = data.error_message || null;
+    this.id_sklad = data.id_sklad || null;
     this.created_at = data.created_at || null;
   }
 
@@ -41,6 +42,7 @@ class OperationLog {
       executor: dbData.executor,
       operation_result: dbData.operation_result,
       error_message: dbData.error_message,
+      id_sklad: dbData.id_sklad,
       created_at: require('../utils/mskTime').sqlDateTimeToMskIso(dbData.created_at)
     });
   }
@@ -71,7 +73,8 @@ class OperationLog {
       execution_time_ms: this.execution_time_ms,
       executor: this.executor,
       operation_result: this.operation_result,
-      error_message: this.error_message
+      error_message: this.error_message,
+      id_sklad: this.id_sklad
     };
   }
 }

@@ -14,7 +14,12 @@ class OperationLogService {
   async logOperation(logData) {
     try {
       // Подготовка данных для сохранения
+      // Склад операции: из query (?id_sklad=) или из тела запроса; без склада остается null
+      const rawSklad = logData.query?.id_sklad ?? logData.body?.id_sklad ?? logData.body?.idScklad;
+      const idSklad = Number.parseInt(rawSklad, 10) || null;
+
       const operationLog = new OperationLog({
+        id_sklad: idSklad,
         endpoint: logData.endpoint,
         http_method: logData.method,
         query_params: this._safeStringify(logData.query),
@@ -137,6 +142,7 @@ class OperationLogService {
       date_to,
       executor,
       endpoint,
+      id_sklad,
       group_by = 'hour',
       include_details = false
     } = params;
@@ -150,6 +156,7 @@ class OperationLogService {
       if (date_to) filters.date_to = date_to;
       if (executor) filters.executor = executor;
       if (endpoint) filters.endpoint = endpoint;
+      if (id_sklad) filters.id_sklad = Number(id_sklad);
 
       // Получаем агрегированные данные из репозитория
       const reportData = await operationLogRepository.getAggregatedData(filters, group_by);

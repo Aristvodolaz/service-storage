@@ -2599,19 +2599,27 @@ class StorageRepository {
         WHERE 1=1
       `;
 
+      // Только поля, которые маппятся ниже: меньше данных по сети и из БД, чем SELECT *
       let dataQuery = `
-        SELECT *
+        SELECT ID, Name, Article, SHK, Product_QNT, Place_QNT, Prunit_Id, Prunit_Name,
+               WR_SHK, id_scklad, Condition_State, Expiration_Date, Create_Date, Update_Date,
+               Executor, reason, name_wr_shk
         FROM [SPOe_rc].[dbo].[x_Storage_Full_Info]
         WHERE 1=1
       `;
 
-      const request = this.pool.request();
+      // Фильтры для обоих запросов (COUNT и выборка) — свои объекты запроса,
+      // mssql не даёт использовать один Request для двух параллельных запросов
+      const buildRequest = () => {
+        const req = this.pool.request();
+        if (id_sklad) req.input('id_sklad', id_sklad);
+        return req;
+      };
 
       // Добавляем фильтрацию по id_sklad, если указан
       if (id_sklad) {
         countQuery += ` AND id_scklad = @id_sklad`;
         dataQuery += ` AND id_scklad = @id_sklad`;
-        request.input('id_sklad', id_sklad);
       }
 
       // Скрываем ячейки, обнулённые инвентаризацией (Place_QNT = 0), если явно не запрошено иное
@@ -2627,15 +2635,17 @@ class StorageRepository {
         FETCH NEXT @limit ROWS ONLY
       `;
 
-      request.input('offset', offset);
-      request.input('limit', limit);
+      const countRequest = buildRequest();
+      const dataRequest = buildRequest();
+      dataRequest.input('offset', offset);
+      dataRequest.input('limit', limit);
 
-      // Получаем общее количество записей
-      const countResult = await request.query(countQuery);
+      // Счетчик и данные идут параллельно: ответ быстрее на время COUNT
+      const [countResult, dataResult] = await Promise.all([
+        countRequest.query(countQuery),
+        dataRequest.query(dataQuery),
+      ]);
       const total = countResult.recordset[0].total;
-
-      // Получаем данные с пагинацией
-      const dataResult = await request.query(dataQuery);
 
       return {
         items: dataResult.recordset.map(item => ({

@@ -113,6 +113,7 @@ class OperationLogController {
         date_to,
         executor,
         endpoint,
+        id_sklad,
         group_by = 'hour', // hour, day, endpoint, executor, status_code
         include_details = 'false'
       } = req.query;
@@ -124,6 +125,7 @@ class OperationLogController {
         date_to,
         executor,
         endpoint,
+        id_sklad,
         group_by,
         include_details: include_details === 'true'
       });

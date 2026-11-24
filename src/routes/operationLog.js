@@ -314,6 +314,7 @@ router.get('/report', [
   query('date_to').optional().isISO8601(),
   query('executor').optional().isString().trim(),
   query('endpoint').optional().isString().trim(),
+  query('id_sklad').optional().isInt({ min: 1 }).toInt(),
   query('group_by').optional().isIn(['hour', 'day', 'endpoint', 'executor', 'status_code', 'method']),
   query('include_details').optional().isBoolean(),
   validate
