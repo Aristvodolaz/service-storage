@@ -37,6 +37,9 @@ function proxy(target) {
   };
 }
 
+// корень раздела — на страницу списка Кати
+router.get('/', (req, res) => res.redirect('/techvp/removal/'));
+
 for (const t of TARGETS) router.use(t.prefix, proxy(t));
 
 module.exports = router;
