@@ -28,8 +28,10 @@ class BaseRepository {
       });
       
       const result = await request.query(query);
-      logger.debug(`Запрос выполнен успешно, получено ${result.recordset.length} записей`);
-      return result.recordset;
+      // DDL (CREATE TABLE) не возвращает recordset: без этого каждый вызов падал с TypeError
+      const rows = result.recordset ?? [];
+      logger.debug(`Запрос выполнен успешно, получено ${rows.length} записей`);
+      return rows;
     } catch (error) {
       logger.error(`Ошибка выполнения запроса: ${error.message}`, { stack: error.stack });
       throw new Error(`Ошибка выполнения запроса: ${error.message}`);
