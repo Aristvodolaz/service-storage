@@ -1059,8 +1059,10 @@ class StorageRepository {
         if (filters.date_from) where.push(`${alias}executedAt >= @dateFrom`);
         if (filters.date_to) where.push(`${alias}executedAt <= @dateTo`);
         // Склад операции определяем по её ячейкам: ШК ячейки есть в справочнике склада
+        // IN вместо коррелированного EXISTS: ячейки склада считаются один раз, а не на каждую строку (~10 с -> быстро)
         if (filters.id_sklad) {
-          where.push(`EXISTS (SELECT 1 FROM [SPOe_rc].[dbo].[x_Storage_Scklads] s WHERE s.WR_House = @idSklad AND (s.shk = ${alias}fromLocationId OR s.shk = ${alias}toLocationId))`);
+          const cellsOfWarehouse = `SELECT s.shk FROM [SPOe_rc].[dbo].[x_Storage_Scklads] s WHERE s.WR_House = @idSklad`;
+          where.push(`(${alias}fromLocationId IN (${cellsOfWarehouse}) OR ${alias}toLocationId IN (${cellsOfWarehouse}))`);
         }
         return where.length ? `WHERE ${where.join(' AND ')}` : '';
       };

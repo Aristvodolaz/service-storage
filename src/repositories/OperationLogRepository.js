@@ -118,6 +118,11 @@ class OperationLogRepository extends BaseRepository {
         params.id_sklad = filters.id_sklad;
       }
 
+      // Только изменяющие запросы: GET от опроса сайта не считаются работой сотрудников
+      if (filters.write_only) {
+        whereConditions.push("http_method <> 'GET'");
+      }
+
       if (filters.status_code) {
         whereConditions.push('status_code = @status_code');
         params.status_code = filters.status_code;
@@ -191,6 +196,11 @@ class OperationLogRepository extends BaseRepository {
         params.id_sklad = filters.id_sklad;
       }
 
+      // Только изменяющие запросы: GET от опроса сайта не считаются работой сотрудников
+      if (filters.write_only) {
+        whereConditions.push("http_method <> 'GET'");
+      }
+
       if (filters.status_code) {
         whereConditions.push('status_code = @status_code');
         params.status_code = filters.status_code;
@@ -257,6 +267,11 @@ class OperationLogRepository extends BaseRepository {
       if (filters.id_sklad) {
         whereConditions.push('id_sklad = @id_sklad');
         params.id_sklad = filters.id_sklad;
+      }
+
+      // Только изменяющие запросы: GET от опроса сайта не считаются работой сотрудников
+      if (filters.write_only) {
+        whereConditions.push("http_method <> 'GET'");
       }
 
       if (filters.status_code) {

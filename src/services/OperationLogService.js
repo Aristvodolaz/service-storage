@@ -157,6 +157,8 @@ class OperationLogService {
       if (executor) filters.executor = executor;
       if (endpoint) filters.endpoint = endpoint;
       if (id_sklad) filters.id_sklad = Number(id_sklad);
+      // Отчет по пользователям: без GET-опроса сайта
+      if (group_by === 'executor') filters.write_only = true;
 
       // Получаем агрегированные данные из репозитория
       const reportData = await operationLogRepository.getAggregatedData(filters, group_by);
