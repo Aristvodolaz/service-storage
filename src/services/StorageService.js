@@ -1853,6 +1853,28 @@ class StorageService {
       };
     }
   }
+
+  /**
+   * Выработка по исполнителям и типам операций
+   * outputs: { success, data: [{ executor, operationType, cnt }] }
+   */
+  async getOutputByExecutor(filters = {}) {
+    try {
+      if (!this.repository) {
+        await this.initialize();
+      }
+
+      const data = await this.repository.getOutputByExecutor(filters);
+      return { success: true, data };
+    } catch (error) {
+      logger.error('Ошибка при получении выработки:', error);
+      return {
+        success: false,
+        errorCode: 500,
+        msg: 'Внутренняя ошибка сервера: ' + error.message
+      };
+    }
+  }
 }
 
 module.exports = new StorageService();

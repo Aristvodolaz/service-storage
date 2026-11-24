@@ -1167,6 +1167,43 @@ class StorageRepository {
   }
 
   /**
+   * Выработка: количество операций по исполнителям и типам (PLACE/PICK/INVENTORY/MOVE)
+   * inputs: filters { date_from, date_to, id_sklad }
+   * outputs: [{ executor, operationType, cnt }]; executor NULL = системные операции
+   */
+  async getOutputByExecutor(filters = {}) {
+    try {
+      const request = this.pool.request();
+      const where = [];
+
+      if (filters.date_from) {
+        where.push('o.executedAt >= @dateFrom');
+        request.input('dateFrom', sql.DateTime, isoToMskSqlDate(filters.date_from));
+      }
+      if (filters.date_to) {
+        where.push('o.executedAt <= @dateTo');
+        request.input('dateTo', sql.DateTime, isoToMskSqlDate(filters.date_to));
+      }
+      if (filters.id_sklad) {
+        where.push(`EXISTS (SELECT 1 FROM [SPOe_rc].[dbo].[x_Storage_Scklads] s WHERE s.WR_House = @idSklad AND (s.shk = o.fromLocationId OR s.shk = o.toLocationId))`);
+        request.input('idSklad', sql.NVarChar, String(filters.id_sklad));
+      }
+
+      const result = await request.query(`
+        SELECT o.executor, o.operationType, COUNT(*) AS cnt
+        FROM [SPOe_rc].[dbo].[x_Storage_Operations] o
+        ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+        GROUP BY o.executor, o.operationType
+      `);
+
+      return result.recordset;
+    } catch (error) {
+      logger.error('Ошибка при получении выработки по исполнителям:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Добавление товара в буфер
    */
   async addToBuffer(data) {
@@ -1351,13 +1388,14 @@ class StorageRepository {
 
       const cell = await this.resolveCell(locationId, id_scklad);
 
+      // Агрегат без GROUP BY: SQL Server не принимает COUNT(DISTINCT) внутри OVER()
       const locationQuery = `
-        SELECT DISTINCT
-          WR_SHK as locationId,
-          id_scklad as skladId,
-          COUNT(*) OVER() as totalItems,
-          SUM(product_qnt) OVER() as totalQuantity,
-          COUNT(DISTINCT article) OVER() as uniqueArticles
+        SELECT
+          MIN(WR_SHK) as locationId,
+          MIN(id_scklad) as skladId,
+          COUNT(*) as totalItems,
+          ISNULL(SUM(TRY_CAST(product_qnt AS FLOAT)), 0) as totalQuantity,
+          COUNT(DISTINCT article) as uniqueArticles
         FROM [SPOe_rc].[dbo].[x_Storage_Full_Info]
         WHERE (
           WR_SHK = @locationId OR WR_SHK = @wrShk
@@ -1380,7 +1418,8 @@ class StorageRepository {
       logger.info('SQL запрос для получения информации о ячейке:', locationQuery);
       const locationResult = await locationRequest.query(locationQuery);
 
-      if (locationResult.recordset.length === 0) {
+      // Агрегат всегда возвращает одну строку, поэтому пустую ячейку определяем по количеству
+      if (locationResult.recordset.length === 0 || locationResult.recordset[0].totalItems === 0) {
         logger.warn(`Ячейка ${locationId} не найдена или пуста`);
         return {
           locationId: cell.shk,

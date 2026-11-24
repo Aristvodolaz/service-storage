@@ -1381,6 +1381,33 @@ class StorageController {
       });
     }
   }
+
+  /**
+   * Выработка по исполнителям и типам операций
+   * inputs: date_from, date_to, id_sklad
+   */
+  async getOutputByExecutor(req, res) {
+    try {
+      const { date_from, date_to, id_sklad } = req.query;
+      const filters = {};
+      if (date_from) filters.date_from = date_from;
+      if (date_to) filters.date_to = date_to;
+      if (id_sklad) filters.id_sklad = id_sklad;
+
+      const result = await storageService.getOutputByExecutor(filters);
+      if (!result.success) {
+        return res.status(result.errorCode || 500).json(result);
+      }
+      return res.status(200).json(result);
+    } catch (error) {
+      logger.error('Ошибка при получении выработки:', error);
+      return res.status(500).json({
+        success: false,
+        errorCode: 500,
+        msg: 'Внутренняя ошибка сервера: ' + error.message
+      });
+    }
+  }
 }
 
 module.exports = new StorageController();

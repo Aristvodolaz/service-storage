@@ -124,6 +124,41 @@ router.get('/operations', [
 
 /**
  * @swagger
+ * /api/storage/operations/output:
+ *   get:
+ *     summary: Выработка по исполнителям (количество операций по типам PLACE/PICK/INVENTORY/MOVE)
+ *     description: executor = null — системные операции без исполнителя
+ *     tags: [Склад]
+ *     parameters:
+ *       - in: query
+ *         name: date_from
+ *         schema:
+ *           type: string
+ *           format: date-time
+ *       - in: query
+ *         name: date_to
+ *         schema:
+ *           type: string
+ *           format: date-time
+ *       - in: query
+ *         name: id_sklad
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: Строки { executor, operationType, cnt }
+ *       500:
+ *         description: Внутренняя ошибка сервера
+ */
+router.get('/operations/output', [
+  query('date_from').optional().isISO8601(),
+  query('date_to').optional().isISO8601(),
+  query('id_sklad').optional().isInt(),
+  validate
+], storageController.getOutputByExecutor);
+
+/**
+ * @swagger
  * /api/storage/info:
  *   get:
  *     summary: Получение информации о товаре по артикулу, ШК или ШК ячейки
